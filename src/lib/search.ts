@@ -9,6 +9,7 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  breadcrumb: string | null;
 }
 
 export async function searchGoogle(query: string, maxResults: number = 20): Promise<SearchResult[]> {
@@ -70,6 +71,7 @@ export async function searchGoogle(query: string, maxResults: number = 20): Prom
           title: item.title || '',
           url: item.url,
           snippet: item.description || '',
+          breadcrumb: item.breadcrumb || null,
         });
       }
       if (results.length >= maxResults) break;

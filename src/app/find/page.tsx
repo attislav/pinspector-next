@@ -5,6 +5,8 @@ import { Search, Loader2, ExternalLink, Plus, Check, X } from 'lucide-react';
 
 interface FoundUrl {
   url: string;
+  title: string;
+  breadcrumb: string | null;
   scraped: boolean;
   error?: string;
   loading?: boolean;
@@ -38,7 +40,12 @@ export default function FindPage() {
         return;
       }
 
-      setFoundUrls(data.urls.map((url: string) => ({ url, scraped: false })));
+      setFoundUrls(data.urls.map((item: { url: string; title: string; breadcrumb: string | null }) => ({
+        url: item.url,
+        title: item.title,
+        breadcrumb: item.breadcrumb,
+        scraped: false,
+      })));
     } catch (err) {
       setError('Netzwerkfehler bei der Suche');
     } finally {
@@ -82,11 +89,9 @@ export default function FindPage() {
     const unscraped = foundUrls.filter(u => !u.scraped && !u.loading);
     if (unscraped.length === 0) return;
 
-    // Scrape in batches of 3
     for (let i = 0; i < foundUrls.length; i++) {
       if (!foundUrls[i].scraped && !foundUrls[i].loading) {
         await handleScrape(i);
-        // Small delay between requests
         await new Promise(resolve => setTimeout(resolve, 300));
       }
     }
@@ -180,13 +185,16 @@ export default function FindPage() {
                     href={urlObj.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-red-700 hover:text-red-900 hover:underline flex items-center gap-2 truncate"
+                    className="text-gray-900 font-medium hover:text-red-700 hover:underline flex items-center gap-2"
                   >
-                    <ExternalLink className="w-4 h-4 flex-shrink-0" />
-                    <span className="truncate">{urlObj.url}</span>
+                    <ExternalLink className="w-4 h-4 flex-shrink-0 text-gray-400" />
+                    <span className="truncate">{urlObj.title || urlObj.url}</span>
                   </a>
+                  {urlObj.breadcrumb && (
+                    <p className="text-sm text-gray-500 mt-0.5 ml-6 truncate">{urlObj.breadcrumb}</p>
+                  )}
                   {urlObj.error && (
-                    <p className="text-red-600 text-sm mt-1">{urlObj.error}</p>
+                    <p className="text-red-600 text-sm mt-1 ml-6">{urlObj.error}</p>
                   )}
                 </div>
                 <div className="flex-shrink-0">
