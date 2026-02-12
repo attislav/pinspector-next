@@ -36,7 +36,7 @@ async function findPinterestUrls(searchQuery: string, limit: number = 20): Promi
 
 export async function POST(request: NextRequest) {
   try {
-    const { keyword, limit = 20 } = await request.json();
+    const { keyword, limit = 20, includeExisting = false } = await request.json();
 
     if (!keyword) {
       return NextResponse.json(
@@ -84,6 +84,21 @@ export async function POST(request: NextRequest) {
     const existingUrls = new Set(existingIdeas.map(i => i.url));
     const duplicates = allUrls.filter(url => existingUrls.has(url));
     const newItems = found.filter(f => !existingUrls.has(f.url));
+
+    // When includeExisting is true, return ALL URLs with an existing flag
+    // (used by Discover page to also process already-known URLs)
+    if (includeExisting) {
+      const urlsWithStatus = found.map(f => ({
+        ...f,
+        existing: existingUrls.has(f.url),
+      }));
+      return NextResponse.json({
+        urls: urlsWithStatus,
+        total: found.length,
+        duplicates: [],
+        message: `${found.length} URLs gefunden (${duplicates.length} bereits in DB)`,
+      });
+    }
 
     return NextResponse.json({
       urls: newItems,

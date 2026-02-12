@@ -17,6 +17,7 @@ interface FoundUrl {
   url: string;
   title: string;
   breadcrumb: string | null;
+  existing: boolean;
   status: 'pending' | 'scraping' | 'done' | 'error' | 'skipped';
   idea?: ScrapedIdea;
   error?: string;
@@ -73,6 +74,18 @@ export default function DiscoverPage() {
   const [showKeywords, setShowKeywords] = useState(false);
   const abortRef = useRef(false);
 
+  // Ref to always have the latest subTopics available in async loops
+  const subTopicsRef = useRef<SubTopic[]>([]);
+
+  // Helper: update both state and ref in sync
+  const updateSubTopics = useCallback((updater: SubTopic[] | ((prev: SubTopic[]) => SubTopic[])) => {
+    setSubTopics(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      subTopicsRef.current = next;
+      return next;
+    });
+  }, []);
+
   const allIdeas = subTopics.flatMap(st =>
     st.urls.filter(u => u.idea).map(u => ({ ...u.idea!, fromTopic: st.name }))
   );
@@ -103,8 +116,10 @@ export default function DiscoverPage() {
 
     abortRef.current = false;
     setError(null);
-    setSubTopics([]);
+    updateSubTopics([]);
     setTopicalMap(null);
+    setShowIdeas(false);
+    setShowKeywords(false);
 
     // Step 1: Generate sub-topics
     setStep('topics');
@@ -137,7 +152,7 @@ export default function DiscoverPage() {
     }
 
     const initialTopics: SubTopic[] = topics.map(name => ({ name, status: 'idle', urls: [] }));
-    setSubTopics(initialTopics);
+    updateSubTopics(initialTopics);
 
     // Step 2: Search for each sub-topic
     setStep('searching');
@@ -148,7 +163,7 @@ export default function DiscoverPage() {
 
       setCurrentAction(`Suche "${initialTopics[i].name}" (${i + 1}/${initialTopics.length})...`);
 
-      setSubTopics(prev => prev.map((st, idx) =>
+      updateSubTopics(prev => prev.map((st, idx) =>
         idx === i ? { ...st, status: 'running' } : st
       ));
 
@@ -156,7 +171,11 @@ export default function DiscoverPage() {
         const res = await fetch('/api/find-interests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keyword: initialTopics[i].name, limit: 5 }),
+          body: JSON.stringify({
+            keyword: initialTopics[i].name,
+            limit: 5,
+            includeExisting: true,  // Get ALL URLs, including already-known ones
+          }),
         });
         const data = await res.json();
 
@@ -170,24 +189,22 @@ export default function DiscoverPage() {
                 url,
                 title: typeof item === 'string' ? url : item.title,
                 breadcrumb: typeof item === 'string' ? null : item.breadcrumb,
+                existing: typeof item === 'string' ? false : !!item.existing,
                 status: 'pending',
               });
             }
           }
-          const skippedUrls: FoundUrl[] = (data.duplicates || []).map((url: string) => ({
-            url, title: url, breadcrumb: null, status: 'skipped' as const,
-          }));
 
-          setSubTopics(prev => prev.map((st, idx) =>
-            idx === i ? { ...st, status: 'done', urls: [...newUrls, ...skippedUrls] } : st
+          updateSubTopics(prev => prev.map((st, idx) =>
+            idx === i ? { ...st, status: 'done', urls: newUrls } : st
           ));
         } else {
-          setSubTopics(prev => prev.map((st, idx) =>
+          updateSubTopics(prev => prev.map((st, idx) =>
             idx === i ? { ...st, status: 'error' } : st
           ));
         }
       } catch {
-        setSubTopics(prev => prev.map((st, idx) =>
+        updateSubTopics(prev => prev.map((st, idx) =>
           idx === i ? { ...st, status: 'error' } : st
         ));
       }
@@ -196,11 +213,13 @@ export default function DiscoverPage() {
     // Step 3: Scrape found URLs
     setStep('scraping');
 
-    let currentTopics: SubTopic[] = [];
-    setSubTopics(prev => { currentTopics = prev; return prev; });
+    // Read current state from the ref (always up to date)
+    const currentTopics = subTopicsRef.current;
 
     let scrapeIndex = 0;
-    const totalToScrape = currentTopics.reduce((sum, st) => sum + st.urls.filter(u => u.status === 'pending').length, 0);
+    const totalToScrape = currentTopics.reduce(
+      (sum, st) => sum + st.urls.filter(u => u.status === 'pending').length, 0
+    );
 
     for (let ti = 0; ti < currentTopics.length; ti++) {
       for (let ui = 0; ui < currentTopics[ti].urls.length; ui++) {
@@ -208,9 +227,14 @@ export default function DiscoverPage() {
         if (currentTopics[ti].urls[ui].status !== 'pending') continue;
 
         scrapeIndex++;
-        setCurrentAction(`Scrape ${scrapeIndex}/${totalToScrape}: ${currentTopics[ti].urls[ui].title.substring(0, 50)}...`);
+        const urlTitle = currentTopics[ti].urls[ui].title || currentTopics[ti].urls[ui].url;
+        const isExisting = currentTopics[ti].urls[ui].existing;
+        setCurrentAction(
+          `Scrape ${scrapeIndex}/${totalToScrape}: ${urlTitle.substring(0, 50)}...` +
+          (isExisting ? ' (bereits bekannt)' : '')
+        );
 
-        setSubTopics(prev => prev.map((st, stIdx) =>
+        updateSubTopics(prev => prev.map((st, stIdx) =>
           stIdx === ti ? {
             ...st,
             urls: st.urls.map((u, uIdx) => uIdx === ui ? { ...u, status: 'scraping' } : u),
@@ -221,7 +245,10 @@ export default function DiscoverPage() {
           const res = await fetch('/api/scrape', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: currentTopics[ti].urls[ui].url }),
+            body: JSON.stringify({
+              url: currentTopics[ti].urls[ui].url,
+              skipIfRecent: isExisting,  // Skip re-scraping if recently done
+            }),
           });
           const data = await res.json();
 
@@ -247,7 +274,7 @@ export default function DiscoverPage() {
               }
             }
 
-            setSubTopics(prev => prev.map((st, stIdx) =>
+            updateSubTopics(prev => prev.map((st, stIdx) =>
               stIdx === ti ? {
                 ...st,
                 urls: st.urls.map((u, uIdx) => uIdx === ui ? {
@@ -263,7 +290,7 @@ export default function DiscoverPage() {
               } : st
             ));
           } else {
-            setSubTopics(prev => prev.map((st, stIdx) =>
+            updateSubTopics(prev => prev.map((st, stIdx) =>
               stIdx === ti ? {
                 ...st,
                 urls: st.urls.map((u, uIdx) => uIdx === ui ? {
@@ -273,7 +300,7 @@ export default function DiscoverPage() {
             ));
           }
         } catch {
-          setSubTopics(prev => prev.map((st, stIdx) =>
+          updateSubTopics(prev => prev.map((st, stIdx) =>
             stIdx === ti ? {
               ...st,
               urls: st.urls.map((u, uIdx) => uIdx === ui ? {
@@ -288,12 +315,14 @@ export default function DiscoverPage() {
 
     setStep('done');
     setCurrentAction('');
-  }, [topic, deepScan]);
+    setShowIdeas(true);  // Auto-expand results when done
+  }, [topic, deepScan, updateSubTopics]);
 
   const handleStop = () => {
     abortRef.current = true;
     setStep('done');
     setCurrentAction('');
+    setShowIdeas(true);  // Show what we have so far
   };
 
   const [clusteringLoading, setClusteringLoading] = useState(false);
@@ -301,8 +330,7 @@ export default function DiscoverPage() {
   const handleCreateTopicalMap = useCallback(async () => {
     setClusteringLoading(true);
 
-    let finalTopics: SubTopic[] = [];
-    setSubTopics(prev => { finalTopics = prev; return prev; });
+    const finalTopics = subTopicsRef.current;
 
     const finalIdeas = finalTopics.flatMap(st =>
       st.urls.filter(u => u.idea).map(u => ({ name: u.idea!.name, searches: u.idea!.searches }))
@@ -542,6 +570,62 @@ export default function DiscoverPage() {
             </div>
           )}
 
+          {/* Scraped Ideas — auto-expanded when done */}
+          {(allIdeas.length > 0 || step === 'done') && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+              <button
+                onClick={() => setShowIdeas(!showIdeas)}
+                className="w-full flex items-center justify-between p-4 text-left"
+              >
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Gefundene Ideas ({allIdeas.length})
+                </h2>
+                {showIdeas ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+              </button>
+              {showIdeas && (
+                <div className="divide-y">
+                  {allIdeas.length === 0 ? (
+                    <div className="px-4 py-8 text-center text-gray-500">
+                      {step === 'done'
+                        ? 'Keine Ideas gefunden. Versuche ein anderes Thema oder passe die Sub-Topics an.'
+                        : 'Scraping läuft...'}
+                    </div>
+                  ) : (
+                    allIdeas
+                      .sort((a, b) => b.searches - a.searches)
+                      .map((idea) => (
+                      <div key={idea.id} className="px-4 py-3 flex items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <Link
+                            href={`/interests/${idea.id}`}
+                            className="text-gray-900 font-medium hover:text-red-700 hover:underline flex items-center gap-2"
+                          >
+                            <Database className="w-4 h-4 flex-shrink-0 text-gray-400" />
+                            <span className="truncate">{idea.name}</span>
+                          </Link>
+                          <p className="text-xs text-gray-500 mt-0.5 ml-6">
+                            via &quot;{idea.fromTopic}&quot;
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <span className="text-sm text-gray-600 whitespace-nowrap">
+                            {formatNumber(idea.searches)} Suchen
+                          </span>
+                          <Link
+                            href={`/interests/${idea.id}`}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </Link>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Sub-Topics (collapsed by default) */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200">
             <button
@@ -579,9 +663,9 @@ export default function DiscoverPage() {
                         <Search className="w-3 h-3" />
                       )}
                       {st.name}
-                      {st.urls.filter(u => u.status !== 'skipped').length > 0 && (
+                      {st.urls.length > 0 && (
                         <span className="text-xs bg-green-200 text-green-800 px-1.5 py-0.5 rounded-full">
-                          {st.urls.filter(u => u.status !== 'skipped').length}
+                          {st.urls.length}
                         </span>
                       )}
                     </span>
@@ -590,54 +674,6 @@ export default function DiscoverPage() {
               </div>
             )}
           </div>
-
-          {/* Scraped Ideas (collapsed by default) */}
-          {allIdeas.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-              <button
-                onClick={() => setShowIdeas(!showIdeas)}
-                className="w-full flex items-center justify-between p-4 text-left"
-              >
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Gefundene Ideas ({allIdeas.length})
-                </h2>
-                {showIdeas ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
-              </button>
-              {showIdeas && (
-                <div className="divide-y">
-                  {allIdeas
-                    .sort((a, b) => b.searches - a.searches)
-                    .map((idea) => (
-                    <div key={idea.id} className="px-4 py-3 flex items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <Link
-                          href={`/interests/${idea.id}`}
-                          className="text-gray-900 font-medium hover:text-red-700 hover:underline flex items-center gap-2"
-                        >
-                          <Database className="w-4 h-4 flex-shrink-0 text-gray-400" />
-                          <span className="truncate">{idea.name}</span>
-                        </Link>
-                        <p className="text-xs text-gray-500 mt-0.5 ml-6">
-                          via &quot;{idea.fromTopic}&quot;
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        <span className="text-sm text-gray-600 whitespace-nowrap">
-                          {formatNumber(idea.searches)} Suchen
-                        </span>
-                        <Link
-                          href={`/interests/${idea.id}`}
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Raw Keywords (collapsed by default) */}
           {allKeywords.length > 0 && (
