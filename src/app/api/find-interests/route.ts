@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { search as ddgSearch, SafeSearchType } from 'duck-duck-scrape';
+import { searchDuckDuckGo } from '@/lib/duckduckgo';
+import { isValidPinterestIdeasUrl } from '@/lib/pinterest-scraper';
 
-async function searchDuckDuckGo(searchQuery: string, limit: number = 20): Promise<string[]> {
+export const maxDuration = 30;
+
+async function findPinterestUrls(searchQuery: string, limit: number = 20): Promise<string[]> {
   const fullQuery = `site:de.pinterest.com/ideas ${searchQuery}`;
-
-  const results = await ddgSearch(fullQuery, {
-    safeSearch: SafeSearchType.OFF,
-  });
+  const results = await searchDuckDuckGo(fullQuery, limit * 2);
 
   const urls: string[] = [];
-  for (const result of results.results) {
-    const url = result.url || '';
-    if (url && url.includes('/ideas/') && !urls.includes(url)) {
+  for (const result of results) {
+    const url = result.url;
+    if (url && url.includes('/ideas/') && isValidPinterestIdeasUrl(url) && !urls.includes(url)) {
       urls.push(url);
     }
     if (urls.length >= limit) break;
@@ -35,14 +35,13 @@ export async function POST(request: NextRequest) {
     // Search for Pinterest Ideas URLs
     let urls: string[] = [];
     try {
-      urls = await searchDuckDuckGo(keyword, limit);
+      urls = await findPinterestUrls(keyword, limit);
     } catch (searchError) {
       console.error('Search error:', searchError);
       const message = searchError instanceof Error ? searchError.message : 'Suchfehler';
-      // DuckDuckGo rate limit
-      if (message.includes('429') || message.includes('rate')) {
+      if (message.includes('Rate-Limit') || message.includes('429')) {
         return NextResponse.json(
-          { error: 'DuckDuckGo Rate-Limit erreicht. Bitte warte einen Moment und versuche es erneut.' },
+          { error: message },
           { status: 429 }
         );
       }

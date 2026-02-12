@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { search as ddgSearch, SafeSearchType } from 'duck-duck-scrape';
+import { searchDuckDuckGo } from '@/lib/duckduckgo';
 import { scrapePinterestIdea, isValidPinterestIdeasUrl, extractIdFromUrl } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
 
@@ -34,12 +34,10 @@ export async function POST(request: NextRequest) {
     let urls: string[] = [];
 
     try {
-      const results = await ddgSearch(fullQuery, {
-        safeSearch: SafeSearchType.OFF,
-      });
+      const results = await searchDuckDuckGo(fullQuery, limit * 2);
 
-      for (const result of results.results) {
-        const url = result.url || '';
+      for (const result of results) {
+        const url = result.url;
         if (url && url.includes('/ideas/') && isValidPinterestIdeasUrl(url) && !urls.includes(url)) {
           urls.push(url);
         }
@@ -48,9 +46,9 @@ export async function POST(request: NextRequest) {
     } catch (searchError) {
       console.error('DuckDuckGo search error:', searchError);
       const message = searchError instanceof Error ? searchError.message : 'Suchfehler';
-      if (message.includes('429') || message.includes('rate')) {
+      if (message.includes('Rate-Limit') || message.includes('429')) {
         return NextResponse.json(
-          { error: 'DuckDuckGo Rate-Limit erreicht. Bitte warte einen Moment.' },
+          { error: message },
           { status: 429 }
         );
       }
