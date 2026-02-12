@@ -8,6 +8,7 @@ interface DbIdea {
   searches: number;
   last_update: Date | null;
   last_scrape: Date | null;
+  created_at: Date | null;
   related_interests: string | null;
   top_annotations: string | null;
   seo_breadcrumbs: string | null;
@@ -45,6 +46,7 @@ export async function GET(
       ...idea,
       last_update: idea.last_update?.toISOString() || null,
       last_scrape: idea.last_scrape?.toISOString() || null,
+      created_at: idea.created_at?.toISOString() || idea.last_scrape?.toISOString() || null,
       related_interests: idea.related_interests ? JSON.parse(idea.related_interests) : [],
       seo_breadcrumbs: idea.seo_breadcrumbs ? JSON.parse(idea.seo_breadcrumbs) : [],
       klp_pivots: idea.klp_pivots ? JSON.parse(idea.klp_pivots) : [],

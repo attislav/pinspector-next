@@ -48,15 +48,30 @@ export async function scrapePinterestIdea(url: string): Promise<ScrapeResult> {
     // Normalize to pinterest.com for consistent data
     const normalizedUrl = normalizeUrl(url);
 
-    // Fetch the page
-    const response = await fetch(normalizedUrl, {
-      headers: {
-        'User-Agent': getRandomUserAgent(),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-      },
-      cache: 'no-store',
-    });
+    // Fetch the page with 15s timeout
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    let response: Response;
+    try {
+      response = await fetch(normalizedUrl, {
+        headers: {
+          'User-Agent': getRandomUserAgent(),
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+    } catch (fetchError) {
+      clearTimeout(timeout);
+      if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+        return { success: false, error: 'Zeitüberschreitung beim Laden der Pinterest-Seite (15s)' };
+      }
+      throw fetchError;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       return { success: false, error: `HTTP Error: ${response.status}` };

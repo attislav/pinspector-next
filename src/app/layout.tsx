@@ -16,7 +16,7 @@ export default function RootLayout({
     <html lang="de">
       <body className="antialiased bg-gray-50 min-h-screen font-sans">
         <Navigation />
-        <main className="max-w-7xl mx-auto px-4 py-8">
+        <main className="max-w-7xl mx-auto px-2 py-4 md:px-4 md:py-8 pb-20 md:pb-8">
           {children}
         </main>
       </body>

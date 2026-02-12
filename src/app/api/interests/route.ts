@@ -9,6 +9,7 @@ interface DbIdea {
   searches: number;
   last_update: Date | null;
   last_scrape: Date | null;
+  created_at: Date | null;
   related_interests: string | null;
   top_annotations: string | null;
   seo_breadcrumbs: string | null;
@@ -27,7 +28,7 @@ function mapDbIdea(row: DbIdea): Idea {
     top_annotations: row.top_annotations,
     seo_breadcrumbs: row.seo_breadcrumbs ? JSON.parse(row.seo_breadcrumbs) : [],
     klp_pivots: row.klp_pivots ? JSON.parse(row.klp_pivots) : [],
-    created_at: row.last_scrape?.toISOString() || new Date().toISOString(),
+    created_at: row.created_at?.toISOString() || row.last_scrape?.toISOString() || new Date().toISOString(),
   };
 }
 

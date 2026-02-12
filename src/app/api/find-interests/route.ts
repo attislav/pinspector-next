@@ -1,44 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { search as ddgSearch, SafeSearchType } from 'duck-duck-scrape';
 
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
-const RAPIDAPI_HOST = 'google-search74.p.rapidapi.com';
-
-async function searchGoogleRapid(searchQuery: string, limit: number = 20): Promise<string[]> {
-  if (!RAPIDAPI_KEY) {
-    throw new Error('RAPIDAPI_KEY nicht konfiguriert');
-  }
-
+async function searchDuckDuckGo(searchQuery: string, limit: number = 20): Promise<string[]> {
   const fullQuery = `site:de.pinterest.com/ideas ${searchQuery}`;
 
-  const response = await fetch(
-    `https://${RAPIDAPI_HOST}/?query=${encodeURIComponent(fullQuery)}&limit=${limit}&related_keywords=false`,
-    {
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY,
-        'X-RapidAPI-Host': RAPIDAPI_HOST,
-      },
-    }
-  );
+  const results = await ddgSearch(fullQuery, {
+    safeSearch: SafeSearchType.OFF,
+  });
 
-  if (!response.ok) {
-    throw new Error(`Google Search API Fehler: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  // Extract Pinterest Ideas URLs from results
   const urls: string[] = [];
-  const results = data.results || [];
-
-  for (const result of results) {
-    const url = result.url || result.link || '';
-    if (url && url.includes('/ideas/')) {
-      // Keep URL as-is if it's valid
-      if (!urls.includes(url)) {
-        urls.push(url);
-      }
+  for (const result of results.results) {
+    const url = result.url || '';
+    if (url && url.includes('/ideas/') && !urls.includes(url)) {
+      urls.push(url);
     }
+    if (urls.length >= limit) break;
   }
 
   return urls;
@@ -58,11 +35,19 @@ export async function POST(request: NextRequest) {
     // Search for Pinterest Ideas URLs
     let urls: string[] = [];
     try {
-      urls = await searchGoogleRapid(keyword, limit);
+      urls = await searchDuckDuckGo(keyword, limit);
     } catch (searchError) {
       console.error('Search error:', searchError);
+      const message = searchError instanceof Error ? searchError.message : 'Suchfehler';
+      // DuckDuckGo rate limit
+      if (message.includes('429') || message.includes('rate')) {
+        return NextResponse.json(
+          { error: 'DuckDuckGo Rate-Limit erreicht. Bitte warte einen Moment und versuche es erneut.' },
+          { status: 429 }
+        );
+      }
       return NextResponse.json(
-        { error: searchError instanceof Error ? searchError.message : 'Suchfehler' },
+        { error: message },
         { status: 500 }
       );
     }
