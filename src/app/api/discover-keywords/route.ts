@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { searchDuckDuckGo } from '@/lib/duckduckgo';
+import { searchGoogle } from '@/lib/search';
 import { scrapePinterestIdea, isValidPinterestIdeasUrl, extractIdFromUrl } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
 
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     let urls: string[] = [];
 
     try {
-      const results = await searchDuckDuckGo(fullQuery, limit * 2);
+      const results = await searchGoogle(fullQuery, limit * 2);
 
       for (const result of results) {
         const url = result.url;

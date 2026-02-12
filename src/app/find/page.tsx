@@ -229,8 +229,8 @@ export default function FindPage() {
       <div className="mt-8 p-4 bg-gray-50 rounded-lg">
         <h3 className="font-medium text-gray-900 mb-2">Hinweis:</h3>
         <p className="text-sm text-gray-600">
-          Die Suche verwendet DuckDuckGo, um Pinterest Ideas URLs zu finden.
-          Kein API-Key erforderlich. Bei zu vielen Anfragen kann ein Rate-Limit greifen.
+          Die Suche verwendet DataForSEO (Google SERP API), um Pinterest Ideas URLs zu finden.
+          Erfordert DATAFORSEO_LOGIN und DATAFORSEO_PASSWORD in .env.local.
         </p>
       </div>
     </div>

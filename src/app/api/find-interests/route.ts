@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { searchDuckDuckGo } from '@/lib/duckduckgo';
+import { searchGoogle } from '@/lib/search';
 import { isValidPinterestIdeasUrl } from '@/lib/pinterest-scraper';
 
 export const maxDuration = 30;
 
 async function findPinterestUrls(searchQuery: string, limit: number = 20): Promise<string[]> {
   const fullQuery = `site:de.pinterest.com/ideas ${searchQuery}`;
-  const results = await searchDuckDuckGo(fullQuery, limit * 2);
+  const results = await searchGoogle(fullQuery, limit * 2);
 
   const urls: string[] = [];
   for (const result of results) {
