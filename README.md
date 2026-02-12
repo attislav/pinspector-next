@@ -64,8 +64,6 @@ Die App läuft dann unter [http://localhost:3000](http://localhost:3000)
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `RAPIDAPI_KEY` (optional)
 
-4. Setze den Root-Ordner in Vercel auf `pinspector-next`
-
 ## Projektstruktur
 
 ```
