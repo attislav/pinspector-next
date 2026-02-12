@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { Sparkles, Loader2, Search, ChevronDown, ChevronUp, ExternalLink, Database, Check, X, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, Search, ChevronDown, ChevronUp, ExternalLink, Database, Check, X, AlertCircle, ArrowRight, Star } from 'lucide-react';
 import Link from 'next/link';
 import { formatNumber } from '@/lib/format';
 
@@ -35,10 +35,29 @@ interface KeywordEntry {
   source: 'annotation' | 'klp_pivot' | 'related_interest';
 }
 
+interface Pillar {
+  name: string;
+  description: string;
+  priority: 'high' | 'medium' | 'low';
+  keywords: string[];
+}
+
+interface TopicalMap {
+  summary: string;
+  pillars: Pillar[];
+  topRecommendation: string;
+}
+
 const SOURCE_COLORS: Record<string, string> = {
   annotation: 'bg-blue-100 text-blue-700',
   klp_pivot: 'bg-purple-100 text-purple-700',
   related_interest: 'bg-green-100 text-green-700',
+};
+
+const PRIORITY_STYLES: Record<string, { border: string; badge: string; badgeText: string }> = {
+  high: { border: 'border-red-300', badge: 'bg-red-100 text-red-700', badgeText: 'Hoch' },
+  medium: { border: 'border-yellow-300', badge: 'bg-yellow-100 text-yellow-700', badgeText: 'Mittel' },
+  low: { border: 'border-gray-300', badge: 'bg-gray-100 text-gray-600', badgeText: 'Nische' },
 };
 
 export default function DiscoverPage() {
@@ -48,9 +67,10 @@ export default function DiscoverPage() {
   const [error, setError] = useState<string | null>(null);
   const [subTopics, setSubTopics] = useState<SubTopic[]>([]);
   const [currentAction, setCurrentAction] = useState('');
-  const [showTopics, setShowTopics] = useState(true);
-  const [showIdeas, setShowIdeas] = useState(true);
-  const [showKeywords, setShowKeywords] = useState(true);
+  const [topicalMap, setTopicalMap] = useState<TopicalMap | null>(null);
+  const [showTopics, setShowTopics] = useState(false);
+  const [showIdeas, setShowIdeas] = useState(false);
+  const [showKeywords, setShowKeywords] = useState(false);
   const abortRef = useRef(false);
 
   const allIdeas = subTopics.flatMap(st =>
@@ -84,6 +104,7 @@ export default function DiscoverPage() {
     abortRef.current = false;
     setError(null);
     setSubTopics([]);
+    setTopicalMap(null);
 
     // Step 1: Generate sub-topics
     setStep('topics');
@@ -140,7 +161,6 @@ export default function DiscoverPage() {
         const data = await res.json();
 
         if (res.ok && data.urls) {
-          // data.urls is now an array of {url, title, breadcrumb}
           const newUrls: FoundUrl[] = [];
           for (const item of data.urls) {
             const url = typeof item === 'string' ? item : item.url;
@@ -154,12 +174,8 @@ export default function DiscoverPage() {
               });
             }
           }
-          // Also include duplicates from data.duplicates as "skipped"
           const skippedUrls: FoundUrl[] = (data.duplicates || []).map((url: string) => ({
-            url,
-            title: url,
-            breadcrumb: null,
-            status: 'skipped' as const,
+            url, title: url, breadcrumb: null, status: 'skipped' as const,
           }));
 
           setSubTopics(prev => prev.map((st, idx) =>
@@ -180,12 +196,8 @@ export default function DiscoverPage() {
     // Step 3: Scrape found URLs
     setStep('scraping');
 
-    // Get current state for scraping
     let currentTopics: SubTopic[] = [];
-    setSubTopics(prev => {
-      currentTopics = prev;
-      return prev;
-    });
+    setSubTopics(prev => { currentTopics = prev; return prev; });
 
     let scrapeIndex = 0;
     const totalToScrape = currentTopics.reduce((sum, st) => sum + st.urls.filter(u => u.status === 'pending').length, 0);
@@ -198,7 +210,6 @@ export default function DiscoverPage() {
         scrapeIndex++;
         setCurrentAction(`Scrape ${scrapeIndex}/${totalToScrape}: ${currentTopics[ti].urls[ui].title.substring(0, 50)}...`);
 
-        // Mark as scraping
         setSubTopics(prev => prev.map((st, stIdx) =>
           stIdx === ti ? {
             ...st,
@@ -215,10 +226,8 @@ export default function DiscoverPage() {
           const data = await res.json();
 
           if (data.success && data.idea) {
-            // Collect keywords from the scraped idea
             const keywords: KeywordEntry[] = [];
             if (deepScan) {
-              // Annotations
               if (data.idea.top_annotations) {
                 const regex = /<a[^>]*>([^<]*)<\/a>/g;
                 let match;
@@ -226,13 +235,11 @@ export default function DiscoverPage() {
                   keywords.push({ name: match[1].toLowerCase(), count: 1, source: 'annotation' });
                 }
               }
-              // KLP Pivots
               if (data.idea.klp_pivots) {
                 for (const p of data.idea.klp_pivots) {
                   keywords.push({ name: p.name.toLowerCase(), count: 1, source: 'klp_pivot' });
                 }
               }
-              // Related Interests
               if (data.idea.related_interests) {
                 for (const r of data.idea.related_interests) {
                   keywords.push({ name: r.name.toLowerCase(), count: 1, source: 'related_interest' });
@@ -260,9 +267,7 @@ export default function DiscoverPage() {
               stIdx === ti ? {
                 ...st,
                 urls: st.urls.map((u, uIdx) => uIdx === ui ? {
-                  ...u,
-                  status: 'error',
-                  error: data.error || 'Scrape fehlgeschlagen',
+                  ...u, status: 'error', error: data.error || 'Scrape fehlgeschlagen',
                 } : u),
               } : st
             ));
@@ -272,9 +277,7 @@ export default function DiscoverPage() {
             stIdx === ti ? {
               ...st,
               urls: st.urls.map((u, uIdx) => uIdx === ui ? {
-                ...u,
-                status: 'error',
-                error: 'Netzwerkfehler',
+                ...u, status: 'error', error: 'Netzwerkfehler',
               } : u),
             } : st
           ));
@@ -290,8 +293,68 @@ export default function DiscoverPage() {
   const handleStop = () => {
     abortRef.current = true;
     setStep('done');
-    setCurrentAction('Abgebrochen');
+    setCurrentAction('');
   };
+
+  const [clusteringLoading, setClusteringLoading] = useState(false);
+
+  const handleCreateTopicalMap = useCallback(async () => {
+    setClusteringLoading(true);
+
+    let finalTopics: SubTopic[] = [];
+    setSubTopics(prev => { finalTopics = prev; return prev; });
+
+    const finalIdeas = finalTopics.flatMap(st =>
+      st.urls.filter(u => u.idea).map(u => ({ name: u.idea!.name, searches: u.idea!.searches }))
+    );
+
+    const kwMap = new Map<string, { count: number; source: string }>();
+    for (const st of finalTopics) {
+      for (const u of st.urls) {
+        if (u.idea) {
+          for (const kw of u.idea.keywords) {
+            const existing = kwMap.get(kw.name);
+            if (existing) { existing.count += kw.count; }
+            else { kwMap.set(kw.name, { count: kw.count, source: kw.source }); }
+          }
+        }
+      }
+    }
+    const finalKeywords: { name: string; count: number; source: string }[] = [];
+    for (const [name, data] of kwMap) {
+      finalKeywords.push({ name, count: data.count, source: data.source });
+    }
+
+    // Also add idea names as keywords for clustering
+    for (const idea of finalIdeas) {
+      if (!kwMap.has(idea.name.toLowerCase())) {
+        finalKeywords.push({ name: idea.name.toLowerCase(), count: 1, source: 'idea_name' });
+      }
+    }
+
+    try {
+      const res = await fetch('/api/cluster-keywords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: topic.trim(),
+          ideas: finalIdeas,
+          keywords: finalKeywords.sort((a, b) => b.count - a.count).slice(0, 100),
+        }),
+      });
+      const data = await res.json();
+
+      if (data.success && data.topicalMap) {
+        setTopicalMap(data.topicalMap);
+      } else {
+        setError(data.error || 'Topical Map konnte nicht erstellt werden');
+      }
+    } catch {
+      setError('Netzwerkfehler beim Erstellen der Topical Map');
+    } finally {
+      setClusteringLoading(false);
+    }
+  }, [topic]);
 
   const isRunning = step === 'topics' || step === 'searching' || step === 'scraping';
 
@@ -300,7 +363,7 @@ export default function DiscoverPage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Topical Map entdecken</h1>
         <p className="text-gray-600">
-          Gib ein Thema ein. Die KI generiert relevante Sub-Topics, sucht dazu Pinterest Ideas und baut eine Keyword-Map.
+          Gib ein Thema ein. Die KI generiert Sub-Topics, sucht Pinterest Ideas, scrapt die Ergebnisse und erstellt eine strukturierte Topical Map.
         </p>
       </div>
 
@@ -354,24 +417,24 @@ export default function DiscoverPage() {
         </div>
       </form>
 
-      {/* Progress bar */}
+      {/* Progress */}
       {isRunning && (
         <div className="mb-6 bg-white rounded-xl shadow-sm border border-gray-200 p-4">
           <div className="flex items-center gap-3 mb-2">
             <Loader2 className="w-5 h-5 animate-spin text-red-600" />
             <span className="text-sm font-medium text-gray-700">{currentAction}</span>
           </div>
-          <div className="flex gap-2 text-xs text-gray-500">
+          <div className="flex gap-1.5 text-xs text-gray-500">
             <span className={step === 'topics' ? 'text-red-600 font-medium' : subTopics.length > 0 ? 'text-green-600' : ''}>
               1. Sub-Topics
             </span>
-            <span>→</span>
+            <ArrowRight className="w-3 h-3" />
             <span className={step === 'searching' ? 'text-red-600 font-medium' : step === 'scraping' ? 'text-green-600' : ''}>
-              2. Pinterest suchen
+              2. Suchen
             </span>
-            <span>→</span>
+            <ArrowRight className="w-3 h-3" />
             <span className={step === 'scraping' ? 'text-red-600 font-medium' : ''}>
-              3. Ideas scrapen
+              3. Scrapen
             </span>
           </div>
         </div>
@@ -407,7 +470,79 @@ export default function DiscoverPage() {
             </div>
           </div>
 
-          {/* Sub-Topics */}
+          {/* Create Topical Map Button */}
+          {step === 'done' && !topicalMap && allIdeas.length > 0 && (
+            <button
+              onClick={handleCreateTopicalMap}
+              disabled={clusteringLoading}
+              className="w-full py-4 bg-gradient-to-r from-red-600 to-orange-500 text-white rounded-xl hover:from-red-700 hover:to-orange-600 disabled:from-gray-400 disabled:to-gray-400 transition-all flex items-center justify-center gap-3 text-lg font-medium shadow-sm"
+            >
+              {clusteringLoading ? (
+                <>
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  KI erstellt Topical Map...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-6 h-6" />
+                  Topical Map erstellen (KI-Clustering)
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Topical Map (main result) */}
+          {topicalMap && (
+            <div className="space-y-4">
+              {/* Summary & Recommendation */}
+              <div className="bg-gradient-to-r from-red-50 to-orange-50 rounded-xl border border-red-200 p-5">
+                <div className="flex items-start gap-3 mb-3">
+                  <Star className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 mb-1">Topical Map: {topic}</h2>
+                    <p className="text-gray-700 text-sm">{topicalMap.summary}</p>
+                  </div>
+                </div>
+                <div className="mt-4 p-3 bg-white/60 rounded-lg border border-red-100">
+                  <p className="text-sm font-medium text-red-800 mb-1">Empfehlung:</p>
+                  <p className="text-sm text-gray-700">{topicalMap.topRecommendation}</p>
+                </div>
+              </div>
+
+              {/* Pillar Cards */}
+              <div className="grid gap-4 md:grid-cols-2">
+                {topicalMap.pillars.map((pillar, i) => {
+                  const style = PRIORITY_STYLES[pillar.priority] || PRIORITY_STYLES.medium;
+                  return (
+                    <div
+                      key={i}
+                      className={`bg-white rounded-xl shadow-sm border-2 ${style.border} p-4`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900">{pillar.name}</h3>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${style.badge}`}>
+                          {style.badgeText}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-3">{pillar.description}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {pillar.keywords.map((kw, ki) => (
+                          <span
+                            key={ki}
+                            className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded-md"
+                          >
+                            {kw}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Sub-Topics (collapsed by default) */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200">
             <button
               onClick={() => setShowTopics(!showTopics)}
@@ -456,7 +591,7 @@ export default function DiscoverPage() {
             )}
           </div>
 
-          {/* Scraped Ideas */}
+          {/* Scraped Ideas (collapsed by default) */}
           {allIdeas.length > 0 && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200">
               <button
@@ -504,7 +639,7 @@ export default function DiscoverPage() {
             </div>
           )}
 
-          {/* Keywords (Deep Scan) */}
+          {/* Raw Keywords (collapsed by default) */}
           {allKeywords.length > 0 && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200">
               <button
@@ -512,7 +647,7 @@ export default function DiscoverPage() {
                 className="w-full flex items-center justify-between p-4 text-left"
               >
                 <h2 className="text-lg font-semibold text-gray-900">
-                  Keyword-Map ({allKeywords.length})
+                  Rohdaten: Keywords ({allKeywords.length})
                 </h2>
                 {showKeywords ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
               </button>
