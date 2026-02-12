@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Search, Database, Compass, ImageIcon } from 'lucide-react';
+import { Search, Database, Compass, ImageIcon, Sparkles } from 'lucide-react';
 
 const navItems = [
   { href: '/search', label: 'Search', icon: Search },
   { href: '/interests', label: 'Interests', icon: Database },
   { href: '/pins', label: 'Pins', icon: ImageIcon },
   { href: '/find', label: 'Find', icon: Compass },
+  { href: '/discover', label: 'Discover', icon: Sparkles },
 ];
 
 export function Navigation() {
