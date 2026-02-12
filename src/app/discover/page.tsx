@@ -210,108 +210,127 @@ export default function DiscoverPage() {
       }
     }
 
-    // Step 3: Scrape found URLs
+    // Step 3: Scrape found URLs (parallel with concurrency limit)
     setStep('scraping');
 
     // Read current state from the ref (always up to date)
     const currentTopics = subTopicsRef.current;
 
-    let scrapeIndex = 0;
-    const totalToScrape = currentTopics.reduce(
-      (sum, st) => sum + st.urls.filter(u => u.status === 'pending').length, 0
-    );
-
+    // Collect all pending tasks with their indices
+    const scrapeTasks: { ti: number; ui: number; url: string; title: string; existing: boolean }[] = [];
     for (let ti = 0; ti < currentTopics.length; ti++) {
       for (let ui = 0; ui < currentTopics[ti].urls.length; ui++) {
-        if (abortRef.current) break;
-        if (currentTopics[ti].urls[ui].status !== 'pending') continue;
-
-        scrapeIndex++;
-        const urlTitle = currentTopics[ti].urls[ui].title || currentTopics[ti].urls[ui].url;
-        const isExisting = currentTopics[ti].urls[ui].existing;
-        setCurrentAction(
-          `Scrape ${scrapeIndex}/${totalToScrape}: ${urlTitle.substring(0, 50)}...` +
-          (isExisting ? ' (bereits bekannt)' : '')
-        );
-
-        updateSubTopics(prev => prev.map((st, stIdx) =>
-          stIdx === ti ? {
-            ...st,
-            urls: st.urls.map((u, uIdx) => uIdx === ui ? { ...u, status: 'scraping' } : u),
-          } : st
-        ));
-
-        try {
-          const res = await fetch('/api/scrape', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              url: currentTopics[ti].urls[ui].url,
-              skipIfRecent: isExisting,  // Skip re-scraping if recently done
-            }),
+        if (currentTopics[ti].urls[ui].status === 'pending') {
+          scrapeTasks.push({
+            ti, ui,
+            url: currentTopics[ti].urls[ui].url,
+            title: currentTopics[ti].urls[ui].title || currentTopics[ti].urls[ui].url,
+            existing: currentTopics[ti].urls[ui].existing,
           });
-          const data = await res.json();
+        }
+      }
+    }
 
-          if (data.success && data.idea) {
-            const keywords: KeywordEntry[] = [];
-            if (deepScan) {
-              if (data.idea.top_annotations) {
-                const regex = /<a[^>]*>([^<]*)<\/a>/g;
-                let match;
-                while ((match = regex.exec(data.idea.top_annotations)) !== null) {
-                  keywords.push({ name: match[1].toLowerCase(), count: 1, source: 'annotation' });
-                }
-              }
-              if (data.idea.klp_pivots) {
-                for (const p of data.idea.klp_pivots) {
-                  keywords.push({ name: p.name.toLowerCase(), count: 1, source: 'klp_pivot' });
-                }
-              }
-              if (data.idea.related_interests) {
-                for (const r of data.idea.related_interests) {
-                  keywords.push({ name: r.name.toLowerCase(), count: 1, source: 'related_interest' });
-                }
+    const totalToScrape = scrapeTasks.length;
+    let completedCount = 0;
+    const CONCURRENCY = 3;
+
+    // Worker function: pulls tasks from queue and processes them
+    const scrapeOne = async (task: typeof scrapeTasks[0]) => {
+      if (abortRef.current) return;
+
+      updateSubTopics(prev => prev.map((st, stIdx) =>
+        stIdx === task.ti ? {
+          ...st,
+          urls: st.urls.map((u, uIdx) => uIdx === task.ui ? { ...u, status: 'scraping' } : u),
+        } : st
+      ));
+
+      try {
+        const res = await fetch('/api/scrape', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: task.url,
+            skipIfRecent: task.existing,
+          }),
+        });
+        const data = await res.json();
+
+        if (data.success && data.idea) {
+          const keywords: KeywordEntry[] = [];
+          if (deepScan) {
+            if (data.idea.top_annotations) {
+              const regex = /<a[^>]*>([^<]*)<\/a>/g;
+              let match;
+              while ((match = regex.exec(data.idea.top_annotations)) !== null) {
+                keywords.push({ name: match[1].toLowerCase(), count: 1, source: 'annotation' });
               }
             }
-
-            updateSubTopics(prev => prev.map((st, stIdx) =>
-              stIdx === ti ? {
-                ...st,
-                urls: st.urls.map((u, uIdx) => uIdx === ui ? {
-                  ...u,
-                  status: 'done',
-                  idea: {
-                    id: data.idea.id,
-                    name: data.idea.name,
-                    searches: data.idea.searches || 0,
-                    keywords,
-                  },
-                } : u),
-              } : st
-            ));
-          } else {
-            updateSubTopics(prev => prev.map((st, stIdx) =>
-              stIdx === ti ? {
-                ...st,
-                urls: st.urls.map((u, uIdx) => uIdx === ui ? {
-                  ...u, status: 'error', error: data.error || 'Scrape fehlgeschlagen',
-                } : u),
-              } : st
-            ));
+            if (data.idea.klp_pivots) {
+              for (const p of data.idea.klp_pivots) {
+                keywords.push({ name: p.name.toLowerCase(), count: 1, source: 'klp_pivot' });
+              }
+            }
+            if (data.idea.related_interests) {
+              for (const r of data.idea.related_interests) {
+                keywords.push({ name: r.name.toLowerCase(), count: 1, source: 'related_interest' });
+              }
+            }
           }
-        } catch {
+
           updateSubTopics(prev => prev.map((st, stIdx) =>
-            stIdx === ti ? {
+            stIdx === task.ti ? {
               ...st,
-              urls: st.urls.map((u, uIdx) => uIdx === ui ? {
-                ...u, status: 'error', error: 'Netzwerkfehler',
+              urls: st.urls.map((u, uIdx) => uIdx === task.ui ? {
+                ...u,
+                status: 'done',
+                idea: {
+                  id: data.idea.id,
+                  name: data.idea.name,
+                  searches: data.idea.searches || 0,
+                  keywords,
+                },
+              } : u),
+            } : st
+          ));
+        } else {
+          updateSubTopics(prev => prev.map((st, stIdx) =>
+            stIdx === task.ti ? {
+              ...st,
+              urls: st.urls.map((u, uIdx) => uIdx === task.ui ? {
+                ...u, status: 'error', error: data.error || 'Scrape fehlgeschlagen',
               } : u),
             } : st
           ));
         }
+      } catch {
+        updateSubTopics(prev => prev.map((st, stIdx) =>
+          stIdx === task.ti ? {
+            ...st,
+            urls: st.urls.map((u, uIdx) => uIdx === task.ui ? {
+              ...u, status: 'error', error: 'Netzwerkfehler',
+            } : u),
+          } : st
+        ));
       }
-      if (abortRef.current) break;
-    }
+
+      completedCount++;
+      setCurrentAction(`Scrape ${completedCount}/${totalToScrape} fertig...`);
+    };
+
+    // Run workers with concurrency pool
+    let taskIndex = 0;
+    const runWorker = async () => {
+      while (taskIndex < scrapeTasks.length && !abortRef.current) {
+        const task = scrapeTasks[taskIndex++];
+        await scrapeOne(task);
+      }
+    };
+
+    setCurrentAction(`Scrape 0/${totalToScrape} (${CONCURRENCY}x parallel)...`);
+    const workers = Array.from({ length: Math.min(CONCURRENCY, scrapeTasks.length) }, () => runWorker());
+    await Promise.all(workers);
 
     setStep('done');
     setCurrentAction('');
