@@ -28,7 +28,8 @@ export async function searchGoogle(query: string, maxResults: number = 20, optio
   const auth = Buffer.from(`${login}:${password}`).toString('base64');
 
   // depth must be multiple of 10, minimum 10
-  const depth = Math.max(10, Math.ceil(maxResults / 10) * 10);
+  // Use higher depth to ensure we get enough results (site: queries often have few organic results)
+  const depth = Math.max(30, Math.ceil(maxResults / 10) * 10);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);

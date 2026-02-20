@@ -44,8 +44,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Scrape-live API error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: `Scrape error: ${message}` },
       { status: 500 }
     );
   }

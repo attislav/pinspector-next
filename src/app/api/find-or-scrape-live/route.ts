@@ -100,8 +100,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Find-or-scrape-live error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: `Error: ${message}` },
       { status: 500 }
     );
   }

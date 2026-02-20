@@ -68,10 +68,31 @@ export async function POST(request: NextRequest) {
     const pins = scrapeResult.pins || [];
 
     // Save idea to database
-    const { isNew, isDuplicate } = await saveIdeaToDb(idea);
+    let isNew = false;
+    let isDuplicate = false;
+    try {
+      const saveResult = await saveIdeaToDb(idea);
+      isNew = saveResult.isNew;
+      isDuplicate = saveResult.isDuplicate;
+    } catch (dbError) {
+      console.error('Database error saving idea:', dbError);
+      // Return the scraped data even if DB save fails
+      return NextResponse.json({
+        success: true,
+        idea,
+        pins,
+        isNew: false,
+        isDuplicate: false,
+        dbError: 'Idee konnte nicht in der Datenbank gespeichert werden',
+      });
+    }
 
-    // Save pins to database
-    await savePinsToDb(idea.id, pins);
+    // Save pins to database (non-critical)
+    try {
+      await savePinsToDb(idea.id, pins);
+    } catch (dbError) {
+      console.error('Database error saving pins:', dbError);
+    }
 
     return NextResponse.json({
       success: true,
@@ -82,8 +103,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Scrape API error:', error);
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
     return NextResponse.json(
-      { success: false, error: 'Interner Serverfehler' },
+      { success: false, error: `Scrape-Fehler: ${message}` },
       { status: 500 }
     );
   }

@@ -128,8 +128,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Find or scrape error:', error);
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
     return NextResponse.json(
-      { success: false, error: 'Interner Serverfehler' },
+      { success: false, error: `Fehler: ${message}` },
       { status: 500 }
     );
   }

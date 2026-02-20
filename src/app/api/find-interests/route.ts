@@ -14,26 +14,40 @@ interface FoundInterest {
 
 async function findPinterestUrls(searchQuery: string, limit: number = 20, language?: string): Promise<FoundInterest[]> {
   const langConfig = getLanguageConfig(language);
-  const fullQuery = `${langConfig.siteFilter} ${searchQuery}`;
-  const results = await searchGoogle(fullQuery, limit * 2, {
-    locationCode: langConfig.locationCode,
-    languageCode: langConfig.languageCode,
-  });
-
   const found: FoundInterest[] = [];
   const seenUrls = new Set<string>();
 
-  for (const result of results) {
-    const url = result.url;
-    if (url && url.includes('/ideas/') && isValidPinterestIdeasUrl(url) && !seenUrls.has(url)) {
-      seenUrls.add(url);
-      found.push({
-        url,
-        title: result.title,
-        breadcrumb: result.breadcrumb,
-      });
+  const collectResults = (results: { url: string; title: string; breadcrumb: string | null }[]) => {
+    for (const result of results) {
+      const url = result.url;
+      if (url && url.includes('/ideas/') && isValidPinterestIdeasUrl(url) && !seenUrls.has(url)) {
+        seenUrls.add(url);
+        found.push({
+          url,
+          title: result.title,
+          breadcrumb: result.breadcrumb,
+        });
+      }
+      if (found.length >= limit) break;
     }
-    if (found.length >= limit) break;
+  };
+
+  // 1. Search with locale-specific site filter (e.g. site:de.pinterest.com/ideas)
+  const narrowQuery = `${langConfig.siteFilter} ${searchQuery}`;
+  const narrowResults = await searchGoogle(narrowQuery, limit * 3, {
+    locationCode: langConfig.locationCode,
+    languageCode: langConfig.languageCode,
+  });
+  collectResults(narrowResults);
+
+  // 2. If we found fewer than desired, do a broader search (site:pinterest.com/ideas)
+  if (found.length < limit) {
+    const broadQuery = `${langConfig.siteFilterBroad} ${searchQuery}`;
+    const broadResults = await searchGoogle(broadQuery, limit * 3, {
+      locationCode: langConfig.locationCode,
+      languageCode: langConfig.languageCode,
+    });
+    collectResults(broadResults);
   }
 
   return found;
@@ -115,8 +129,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Find interests error:', error);
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
     return NextResponse.json(
-      { error: 'Interner Serverfehler' },
+      { error: `Suchfehler: ${message}` },
       { status: 500 }
     );
   }
