@@ -8,6 +8,43 @@
 
 ---
 
+## Multi-Language Support
+
+Die Such- und Scraping-Endpoints unterstuetzen einen optionalen `language`-Parameter, um Pinterest-Ideas in verschiedenen Sprachen/Maerkten zu finden.
+
+| Code | Sprache | Pinterest-Domain | DataForSEO-Markt |
+|------|---------|------------------|------------------|
+| `de` | Deutsch (Default) | de.pinterest.com | Deutschland (2276) |
+| `en` | Englisch | www.pinterest.com | USA (2840) |
+| `fr` | Franzoesisch | fr.pinterest.com | Frankreich (2250) |
+| `es` | Spanisch | es.pinterest.com | Spanien (2724) |
+| `it` | Italienisch | it.pinterest.com | Italien (2380) |
+| `pt` | Portugiesisch | br.pinterest.com | Brasilien (2076) |
+| `nl` | Niederlaendisch | nl.pinterest.com | Niederlande (2528) |
+
+**Betroffene Endpoints:** `/api/discover-keywords`, `/api/find-interests`, `/api/find-or-scrape`, `/api/scrape`
+
+Wird kein `language` angegeben, wird automatisch `"de"` verwendet (Rueckwaertskompatibel).
+
+```bash
+# Deutsche Ergebnisse (Default)
+curl -X POST "$BASE_URL/api/find-interests" \
+  -H "Content-Type: application/json" \
+  -d '{"keyword": "wohnzimmer deko"}'
+
+# Englische Ergebnisse
+curl -X POST "$BASE_URL/api/find-interests" \
+  -H "Content-Type: application/json" \
+  -d '{"keyword": "living room decor", "language": "en"}'
+
+# Franzoesische Ergebnisse
+curl -X POST "$BASE_URL/api/discover-keywords" \
+  -H "Content-Type: application/json" \
+  -d '{"keyword": "décoration salon", "language": "fr"}'
+```
+
+---
+
 ## Schnellstart: Keyword-Recherche in 3 Schritten
 
 ```bash
@@ -68,7 +105,8 @@ Sucht via Google (DataForSEO) nach Pinterest-Ideas-URLs, scrapt sie und extrahie
   "keyword": "home office einrichten",
   "limit": 10,
   "scrapeLimit": 5,
-  "skipExisting": true
+  "skipExisting": true,
+  "language": "de"
 }
 ```
 
@@ -78,6 +116,7 @@ Sucht via Google (DataForSEO) nach Pinterest-Ideas-URLs, scrapt sie und extrahie
 | limit | number | nein | 10 | Anzahl URLs die gesucht werden |
 | scrapeLimit | number | nein | 5 | Anzahl URLs die tatsaechlich gescrapt werden |
 | skipExisting | boolean | nein | true | Bereits bekannte Ideas ueberspringen |
+| language | string | nein | "de" | Sprache/Markt (de, en, fr, es, it, pt, nl) |
 
 **Response:**
 ```json
@@ -227,9 +266,16 @@ Scrapt eine einzelne Pinterest-Ideas-URL und speichert die Daten.
 ```json
 {
   "url": "https://www.pinterest.com/ideas/meal-prep/123456/",
-  "skipIfRecent": false
+  "skipIfRecent": false,
+  "language": "en"
 }
 ```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| url | string | ja | - | Pinterest-Ideas-URL |
+| skipIfRecent | boolean | nein | false | Nicht erneut scrapen wenn kuerzlich gescrapt |
+| language | string | nein | "de" | Sprache/Markt fuer Accept-Language Header |
 
 **Response:**
 ```json
@@ -266,15 +312,24 @@ Sucht eine Interest in der DB oder scrapt sie bei Bedarf.
 **Request (nach Name):**
 ```json
 {
-  "name": "meal prep"
+  "name": "meal prep",
+  "language": "de"
 }
 ```
 
 **Request (nach URL):**
 ```json
 {
-  "url": "https://www.pinterest.com/ideas/meal-prep/123456/"
+  "url": "https://www.pinterest.com/ideas/meal-prep/123456/",
+  "language": "en"
 }
+```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| name | string | nein* | - | Keyword-Name (*entweder name oder url) |
+| url | string | nein* | - | Pinterest-Ideas-URL (*entweder name oder url) |
+| language | string | nein | "de" | Sprache/Markt fuer Scraping und URL-Konstruktion |
 ```
 
 **Response:**
@@ -300,9 +355,17 @@ Sucht via Google nach Pinterest-Ideas-URLs zu einem Keyword.
 {
   "keyword": "meal prep",
   "limit": 20,
-  "includeExisting": false
+  "includeExisting": false,
+  "language": "en"
 }
 ```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| keyword | string | ja | - | Suchbegriff |
+| limit | number | nein | 20 | Max. Anzahl URLs |
+| includeExisting | boolean | nein | false | Bereits bekannte URLs mit zurueckgeben |
+| language | string | nein | "de" | Sprache/Markt (de, en, fr, es, it, pt, nl) |
 
 **Response:**
 ```json
