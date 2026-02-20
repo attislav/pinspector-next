@@ -117,7 +117,7 @@ export function useIdeaDetail(id: string) {
       const response = await fetchWithTimeout('/api/find-or-scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: annotationName }),
+        body: JSON.stringify({ name: annotationName, language: idea?.language }),
       });
       const result = await response.json();
       if (result.success && result.idea) {
@@ -187,13 +187,13 @@ export function useIdeaDetail(id: string) {
         await new Promise(resolve => setTimeout(resolve, 300));
       };
 
-      for (const pivot of klpPivotUrls) await scrapeItem(pivot.name, { url: pivot.url, skipIfRecent: true });
-      for (const interest of relatedInterestUrls) await scrapeItem(interest.name, { url: interest.url, skipIfRecent: true });
+      for (const pivot of klpPivotUrls) await scrapeItem(pivot.name, { url: pivot.url, skipIfRecent: true, language: idea?.language });
+      for (const interest of relatedInterestUrls) await scrapeItem(interest.name, { url: interest.url, skipIfRecent: true, language: idea?.language });
       for (const name of topAnnotationNames) {
         current++;
         setAnnotationProgress({ current, total: totalCount, currentName: name, success, failed });
         try {
-          const response = await fetchWithTimeout('/api/find-or-scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+          const response = await fetchWithTimeout('/api/find-or-scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, language: idea?.language }) });
           const result = await response.json();
           result.success ? success++ : failed++;
         } catch { failed++; }
@@ -288,7 +288,7 @@ export function useIdeaDetail(id: string) {
   const scrapeAndNavigate = async (url: string) => {
     setScrapingUrl(url);
     try {
-      const response = await fetchWithTimeout('/api/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, skipIfRecent: true }) });
+      const response = await fetchWithTimeout('/api/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, skipIfRecent: true, language: idea?.language }) });
       const result = await response.json();
       if (result.success && result.idea) router.push(`/interests/${result.idea.id}`);
       else alert(result.error || 'Fehler beim Scrapen');
@@ -300,7 +300,7 @@ export function useIdeaDetail(id: string) {
     if (!idea?.url) return;
     setRescraping(true);
     try {
-      const response = await fetchWithTimeout('/api/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: idea.url }) });
+      const response = await fetchWithTimeout('/api/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: idea.url, language: idea.language }) });
       const result = await response.json();
       if (result.success && result.idea) { setIdea(result.idea); if (result.pins) setPins(result.pins); fetchData(); }
       else alert(result.error || 'Fehler beim Scrapen');

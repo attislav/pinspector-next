@@ -103,7 +103,7 @@ export default function InterestsPage() {
       for (let i = 0; i < selectedIdeas.length; i++) {
         const idea = selectedIdeas[i];
         setRescrapeProgress({ current: i + 1, total: selectedIdeas.length, currentName: idea.name });
-        try { await fetch('/api/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: idea.url }) }); }
+        try { await fetch('/api/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: idea.url, language: idea.language }) }); }
         catch (err) { console.error(`Error rescraping ${idea.name}:`, err); }
         if (i < selectedIdeas.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
       }

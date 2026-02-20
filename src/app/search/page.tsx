@@ -53,7 +53,7 @@ export default function SearchPage() {
       const response = await fetch('/api/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: result.idea.url, rescrape: true }),
+        body: JSON.stringify({ url: result.idea.url, rescrape: true, language: result.idea.language }),
       });
 
       const data = await response.json();
