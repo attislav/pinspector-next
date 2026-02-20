@@ -22,14 +22,18 @@ export function isValidPinterestIdeasUrl(url: string): boolean {
   return /^https?:\/\/([a-z]{2}\.)?((www\.)?pinterest\.[a-z.]+)\/ideas\/[^/]+\/\d+/.test(url);
 }
 
-// Normalize URL to pinterest.com (not de.pinterest.com)
-function normalizeUrl(url: string): string {
-  return url.replace(/https?:\/\/[a-z]{2}\.pinterest\.com/, 'https://www.pinterest.com')
-            .replace(/https?:\/\/pinterest\.com/, 'https://www.pinterest.com');
+// Normalize URL to the target Pinterest domain (language-aware)
+function normalizeUrl(url: string, targetDomain?: string): string {
+  if (targetDomain) {
+    return url.replace(/https?:\/\/([a-z]{2}\.)?(www\.)?pinterest\.[a-z.]+/, `https://${targetDomain}`);
+  }
+  // Fallback: keep original domain
+  return url;
 }
 
 export interface ScrapeOptions {
   acceptLanguage?: string;
+  pinterestDomain?: string;
 }
 
 // Parse Pinterest Ideas page and extract data
@@ -49,8 +53,8 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
       return { success: false, error: 'Konnte ID nicht aus URL extrahieren' };
     }
 
-    // Normalize to pinterest.com for consistent data
-    const normalizedUrl = normalizeUrl(url);
+    // Normalize to the target Pinterest domain for language-correct data
+    const normalizedUrl = normalizeUrl(url, options?.pinterestDomain);
 
     // Fetch the page with 15s timeout
     const controller = new AbortController();
@@ -131,12 +135,13 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
       .filter(Boolean);
 
     // Extract related interests
+    const baseDomain = options?.pinterestDomain || 'www.pinterest.com';
     const relatedInterests: RelatedInterest[] = (interestData.seo_related_interests || [])
       .map((i: any) => ({
         name: i.name,
         url: i.url?.startsWith('http')
           ? i.url
-          : `https://www.pinterest.com${i.url || `/ideas/${i.key}/`}`,
+          : `https://${baseDomain}${i.url || `/ideas/${i.key}/`}`,
         id: i.id,
       }))
       .filter((i: RelatedInterest) => i.name);
@@ -148,7 +153,7 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
         name: p.pivot_full_name,
         url: p.pivot_url?.startsWith('http')
           ? p.pivot_url
-          : `https://www.pinterest.com${p.pivot_url}`,
+          : `https://${baseDomain}${p.pivot_url}`,
       }));
 
     // Extract annotations from pins
