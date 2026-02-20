@@ -657,7 +657,7 @@ const [ideaRes, historyRes, pinsRes] = await Promise.all([
 ### OpenAI (Content-Analyse)
 
 - **Was:** Keyword-Extraktion und Content-Strategie-Analyse
-- **Modell:** GPT-4 Mini
+- **Modell:** GPT-4.1 Mini (`gpt-4.1-mini-2025-04-14`)
 - **Verwendung:**
   - Keyword-Extraktion aus Pin-Titeln (`/api/extract-keywords`)
   - Content-Strategie-Empfehlungen (`/api/analyze-content`)
