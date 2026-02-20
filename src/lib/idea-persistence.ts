@@ -28,8 +28,9 @@ export async function saveIdeaToDb(idea: Idea): Promise<{ isNew: boolean; isDupl
         related_interests = $6,
         top_annotations = $7,
         seo_breadcrumbs = $8,
-        klp_pivots = $9
-      WHERE id = $10`,
+        klp_pivots = $9,
+        language = COALESCE($10, language)
+      WHERE id = $11`,
       [
         idea.name,
         idea.url,
@@ -40,6 +41,7 @@ export async function saveIdeaToDb(idea: Idea): Promise<{ isNew: boolean; isDupl
         idea.top_annotations,
         JSON.stringify(idea.seo_breadcrumbs),
         JSON.stringify(idea.klp_pivots),
+        idea.language,
         idea.id,
       ]
     );
@@ -54,8 +56,8 @@ export async function saveIdeaToDb(idea: Idea): Promise<{ isNew: boolean; isDupl
 
   // Insert new idea
   await query(
-    `INSERT INTO public.ideas (id, name, url, searches, last_update, last_scrape, related_interests, top_annotations, seo_breadcrumbs, klp_pivots)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    `INSERT INTO public.ideas (id, name, url, searches, last_update, last_scrape, related_interests, top_annotations, seo_breadcrumbs, klp_pivots, language)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
       idea.id,
       idea.name,
@@ -67,6 +69,7 @@ export async function saveIdeaToDb(idea: Idea): Promise<{ isNew: boolean; isDupl
       idea.top_annotations,
       JSON.stringify(idea.seo_breadcrumbs),
       JSON.stringify(idea.klp_pivots),
+      idea.language,
     ]
   );
 

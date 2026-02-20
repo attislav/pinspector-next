@@ -22,9 +22,11 @@ Die Such- und Scraping-Endpoints unterstuetzen einen optionalen `language`-Param
 | `pt` | Portugiesisch | br.pinterest.com | Brasilien (2076) |
 | `nl` | Niederlaendisch | nl.pinterest.com | Niederlande (2528) |
 
-**Betroffene Endpoints:** `/api/discover-keywords`, `/api/find-interests`, `/api/find-or-scrape`, `/api/scrape`
+**Betroffene Endpoints:** `/api/discover-keywords`, `/api/find-interests`, `/api/find-or-scrape`, `/api/scrape`, `/api/scrape-live`, `/api/find-or-scrape-live`, `/api/pins-live`
 
 Wird kein `language` angegeben, wird automatisch `"de"` verwendet (Rueckwaertskompatibel).
+
+Die verwendete Sprache wird im `language`-Feld des Idea-Objekts gespeichert und bei erneutem Scraping automatisch wiederverwendet.
 
 ```bash
 # Deutsche Ergebnisse (Default)
@@ -295,7 +297,8 @@ Scrapt eine einzelne Pinterest-Ideas-URL und speichert die Daten.
     "seo_breadcrumbs": ["Food", "Meal Planning"],
     "klp_pivots": [
       { "name": "meal prep ideas", "url": "/ideas/meal-prep-ideas/456/" }
-    ]
+    ],
+    "language": "en"
   },
   "pins": [],
   "isNew": true,
@@ -566,6 +569,144 @@ oder mit Filtern:
 ```
 
 **Response:** CSV-Datei (Content-Type: text/csv)
+
+---
+
+### 17. POST /api/scrape-live
+
+Scrapt eine Pinterest-Ideas-URL live. **Kein DB-Zugriff** -- weder Lesen noch Schreiben.
+
+**Request:**
+```json
+{
+  "url": "https://de.pinterest.com/ideas/wohnzimmer-deko/123456/",
+  "language": "de"
+}
+```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| url | string | ja | - | Pinterest-Ideas-URL |
+| language | string | nein | auto-detect | Sprache/Markt. Wird automatisch aus URL erkannt wenn nicht angegeben |
+
+**Response:**
+```json
+{
+  "success": true,
+  "idea": { "...": "idea object (inkl. language)" },
+  "pins": [],
+  "language": "de"
+}
+```
+
+---
+
+### 18. POST /api/find-or-scrape-live
+
+Findet eine Pinterest-Ideas-Seite per Name oder URL und scrapt live. **Kein DB-Zugriff.**
+
+**Request (nach Name):**
+```json
+{
+  "name": "wohnzimmer deko",
+  "language": "de"
+}
+```
+
+**Request (nach URL):**
+```json
+{
+  "url": "https://de.pinterest.com/ideas/wohnzimmer-deko/123456/",
+  "language": "de"
+}
+```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| name | string | nein* | - | Keyword-Name (*entweder name oder url) |
+| url | string | nein* | - | Pinterest-Ideas-URL (*entweder name oder url) |
+| language | string | nein | auto-detect/de | Sprache/Markt |
+
+**Response:**
+```json
+{
+  "success": true,
+  "idea": { "...": "idea object (inkl. language)" },
+  "pins": [],
+  "source": "scraped",
+  "language": "de"
+}
+```
+
+`source` kann sein: `"scraped"`, `"scraped_redirect"`
+
+---
+
+### 19. POST /api/pins-live
+
+Scrapt Pins einer Pinterest-Ideas-Seite live. **Kein DB-Zugriff.**
+
+**Request:**
+```json
+{
+  "url": "https://de.pinterest.com/ideas/wohnzimmer-deko/123456/",
+  "language": "de"
+}
+```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| url | string | ja | - | Pinterest-Ideas-URL |
+| language | string | nein | auto-detect | Sprache/Markt |
+
+**Response:**
+```json
+{
+  "success": true,
+  "idea_id": "123456",
+  "idea_name": "wohnzimmer deko",
+  "pins": [],
+  "total": 0,
+  "language": "de"
+}
+```
+
+---
+
+### 20. POST /api/find-interests-live
+
+Sucht via Google nach Pinterest-Ideas-URLs. **Kein DB-Zugriff** -- kein Duplikat-Check.
+
+**Request:**
+```json
+{
+  "keyword": "wohnzimmer deko",
+  "limit": 20,
+  "language": "de"
+}
+```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| keyword | string | ja | - | Suchbegriff |
+| limit | number | nein | 20 | Max. Anzahl URLs |
+| language | string | nein | "de" | Sprache/Markt |
+
+**Response:**
+```json
+{
+  "success": true,
+  "urls": [
+    {
+      "url": "https://de.pinterest.com/ideas/wohnzimmer-deko/123456/",
+      "title": "Wohnzimmer Deko Ideen",
+      "breadcrumb": "Wohnen > Wohnzimmer"
+    }
+  ],
+  "total": 15,
+  "language": "de"
+}
+```
 
 ---
 

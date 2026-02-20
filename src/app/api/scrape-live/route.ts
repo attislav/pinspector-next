@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
     const scrapeResult = await scrapePinterestIdea(url, {
       acceptLanguage: langConfig.acceptLanguage,
       pinterestDomain: langConfig.pinterestDomain,
+      language: langConfig.languageCode,
     });
 
     if (!scrapeResult.success || !scrapeResult.idea) {

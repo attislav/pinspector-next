@@ -34,6 +34,7 @@ function normalizeUrl(url: string, targetDomain?: string): string {
 export interface ScrapeOptions {
   acceptLanguage?: string;
   pinterestDomain?: string;
+  language?: string;
 }
 
 // Parse Pinterest Ideas page and extract data
@@ -301,6 +302,7 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
       top_annotations: topAnnotations,
       seo_breadcrumbs: seoBreadcrumbs,
       klp_pivots: klpPivots,
+      language: options?.language || null,
       created_at: now,
     };
 

@@ -11,6 +11,7 @@ export interface Idea {
   top_annotations: string | null;
   seo_breadcrumbs: string[];
   klp_pivots: KlpPivot[];
+  language: string | null;
   created_at: string;
 }
 
