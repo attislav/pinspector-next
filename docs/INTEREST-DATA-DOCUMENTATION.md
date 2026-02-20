@@ -21,6 +21,7 @@ Dieses Dokument beschreibt detailliert, wie Pinspector die Daten fuer eine Pinte
 13. [Datenbank-Schema](#13-datenbank-schema)
 14. [Zusammenfassung der Darstellung auf der Detail-Seite](#14-zusammenfassung-der-darstellung-auf-der-detail-seite)
 15. [Externe Abhaengigkeiten / APIs](#15-externe-abhaengigkeiten--apis)
+16. [API-Architektur: Interne vs. Externe Endpoints](#16-api-architektur-interne-vs-externe-endpoints)
 
 ---
 
@@ -94,16 +95,34 @@ Eingabe-URL -> Validierung -> Normalisierung -> Fetch
 1. **Validierung:** URL muss dem Pattern `/ideas/{slug}/{id}` entsprechen
    - Regex: `/^https?:\/\/([a-z]{2}\.)?((www\.)?pinterest\.[a-z.]+)\/ideas\/[^/]+\/\d+/`
 2. **ID-Extraktion:** Die numerische ID wird per Regex extrahiert: `/\/ideas\/[^/]+\/(\d+)/`
-3. **Normalisierung:** `de.pinterest.com` wird zu `www.pinterest.com` umgeschrieben (fuer konsistente Daten)
+3. **Normalisierung:** URL wird zum sprachspezifischen Pinterest-Domain umgeschrieben (z.B. `de.pinterest.com` fuer Deutsch, `www.pinterest.com` fuer Englisch)
 
-### 3.2 HTTP-Request
+### 3.2 Multi-Language Support
+
+**Quelldatei:** `src/lib/language-config.ts`
+
+Der Scraper unterstuetzt 7 Sprachen. Die Sprache bestimmt Domain, HTTP-Header und Suchergebnisse:
+
+| Sprache | Pinterest Domain | Location Code | Accept-Language |
+|---------|-----------------|---------------|-----------------|
+| `de` (Standard) | de.pinterest.com | 2276 | de-DE,de;q=0.9... |
+| `en` | www.pinterest.com | 2840 | en-US,en;q=0.9 |
+| `fr` | fr.pinterest.com | 2250 | fr-FR,fr;q=0.9... |
+| `es` | es.pinterest.com | 2724 | es-ES,es;q=0.9... |
+| `it` | it.pinterest.com | 2380 | it-IT,it;q=0.9... |
+| `pt` | br.pinterest.com | 2076 | pt-BR,pt;q=0.9... |
+| `nl` | nl.pinterest.com | 2528 | nl-NL,nl;q=0.9... |
+
+**Sprach-Erkennung:** Die Sprache wird automatisch aus der URL erkannt (`detectLanguageFromUrl()`), kann aber explizit ueberschrieben werden.
+
+### 3.3 HTTP-Request
 
 ```javascript
 fetch(normalizedUrl, {
   headers: {
     'User-Agent': randomUserAgent,  // Rotation aus 3 User-Agents
     'Accept': 'text/html,application/xhtml+xml,...',
-    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept-Language': langConfig.acceptLanguage, // Sprachspezifisch
   },
   cache: 'no-store',
   signal: abortController.signal,  // 15 Sekunden Timeout
@@ -117,7 +136,7 @@ fetch(normalizedUrl, {
 
 **Timeout:** 15 Sekunden.
 
-### 3.3 HTML-Parsing
+### 3.4 HTML-Parsing
 
 Aus dem HTML wird das `<script id="__PWS_INITIAL_PROPS__">` Tag per Regex extrahiert:
 
@@ -128,7 +147,7 @@ const scriptMatch = html.match(
 const jsonData = JSON.parse(scriptMatch[1]);
 ```
 
-### 3.4 Daten-Extraktion
+### 3.5 Daten-Extraktion
 
 Navigation zum InterestResource:
 
@@ -138,7 +157,7 @@ const interestResourceKey = Object.keys(resources.InterestResource)[0];
 const interestData = resources.InterestResource[interestResourceKey].data;
 ```
 
-### 3.5 Batch-Scraping mit Rate-Limiting
+### 3.6 Batch-Scraping mit Rate-Limiting
 
 Beim Scrapen mehrerer URLs wird ein Delay von 2-3 Sekunden (zufaellig) zwischen den Requests eingehalten:
 
@@ -469,30 +488,42 @@ fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
     'Content-Type': 'application/json',
   },
   body: JSON.stringify([{
-    keyword: `site:de.pinterest.com/ideas ${suchbegriff}`,
-    location_code: 2276,    // Deutschland
-    language_code: 'de',
+    keyword: `${langConfig.siteFilter} ${suchbegriff}`,
+    location_code: langConfig.locationCode,  // z.B. 2276 (DE), 2840 (US)
+    language_code: langConfig.languageCode,   // z.B. 'de', 'en'
     device: 'desktop',
     depth: 10-100,          // Anzahl Ergebnisse (Vielfaches von 10)
   }]),
 });
 ```
 
+Der `siteFilter` wird sprachspezifisch gesetzt, z.B.:
+- Deutsch: `site:de.pinterest.com/ideas`
+- Englisch: `site:www.pinterest.com/ideas`
+- Franzoesisch: `site:fr.pinterest.com/ideas`
+
 ### So funktioniert es
 
-1. Google-Suche mit `site:de.pinterest.com/ideas {keyword}`
+1. Google-Suche mit `site:{sprachspezifische-domain}/ideas {keyword}`
 2. Aus den Suchergebnissen werden alle URLs mit `/ideas/`-Format extrahiert
-3. URLs werden auf Duplikate geprueft (gegen bereits in der DB vorhandene)
-4. Die gefundenen URLs koennen dann einzeln oder im Batch gescrapt werden
+3. **Interner Endpoint (`/api/find-interests`):** URLs werden auf Duplikate geprueft (gegen DB)
+4. **Externer Endpoint (`/api/find-interests-live`):** Alle URLs werden direkt zurueckgegeben (kein DB-Zugriff)
+5. Die gefundenen URLs koennen dann einzeln oder im Batch gescrapt werden
 
 ### Alternative: Find-or-Scrape
 
-Der Endpoint `POST /api/find-or-scrape` kann ein Interest auch ohne Google-Suche finden:
+Die Endpoints `POST /api/find-or-scrape` (intern) und `POST /api/find-or-scrape-live` (extern) koennen ein Interest auch ohne Google-Suche finden:
 
+**Interner Endpoint (`/api/find-or-scrape`):**
 1. Zuerst: Suche in der Datenbank (exakt, dann partial match)
 2. Dann: Versuche die Pinterest-URL zu konstruieren (Slug aus dem Namen generieren)
 3. Folge Redirects, um die numerische ID zu erhalten
-4. Scrape die finale URL
+4. Scrape die finale URL und speichere in DB
+
+**Externer Endpoint (`/api/find-or-scrape-live`):**
+1. Direkt: Versuche die Pinterest-URL zu konstruieren (kein DB-Lookup)
+2. Folge Redirects, um die numerische ID zu erhalten
+3. Scrape die finale URL (kein DB-Speichern)
 
 ---
 
@@ -638,6 +669,92 @@ const [ideaRes, historyRes, pinsRes] = await Promise.all([
 
 - **Hosting:** Hetzner (Self-hosted)
 - **Env-Variable:** `DATABASE_URL`
+
+---
+
+## 16. API-Architektur: Interne vs. Externe Endpoints
+
+Die API ist in zwei Bereiche aufgeteilt:
+
+### Externe Endpoints (`-live` Suffix)
+
+Fuer externe Konsumenten und Integrationen. **Kein Datenbank-Zugriff** — weder Lesen noch Schreiben. Scrapen und liefern immer frische Daten direkt von Pinterest/Google.
+
+| Endpoint | Methode | Body | Beschreibung |
+|----------|---------|------|-------------|
+| `/api/scrape-live` | POST | `{ url, language? }` | Pinterest Ideas-Seite scrapen (Idea + Pins) |
+| `/api/pins-live` | POST | `{ url, language? }` | Nur Pins einer Ideas-Seite scrapen |
+| `/api/find-interests-live` | POST | `{ keyword, limit?, language? }` | Pinterest Ideas URLs via Google-Suche finden |
+| `/api/find-or-scrape-live` | POST | `{ name?, url?, language? }` | Interest per Name oder URL finden und scrapen |
+
+**Alle externen Endpoints unterstuetzen Multi-Language** ueber den optionalen `language` Parameter:
+- Unterstuetzte Werte: `de`, `en`, `fr`, `es`, `it`, `pt`, `nl`
+- Sprache wird automatisch aus der URL erkannt (z.B. `fr.pinterest.com` → `fr`)
+- Expliziter `language` Parameter ueberschreibt die Auto-Erkennung
+- Standard (wenn nichts angegeben): `de`
+
+#### Beispiel-Aufrufe
+
+**Englische Idea-Page scrapen:**
+```json
+POST /api/scrape-live
+{ "url": "https://www.pinterest.com/ideas/gardening/942773031901/" }
+```
+
+**Pins einer franzoesischen Idea-Page holen:**
+```json
+POST /api/pins-live
+{ "url": "https://fr.pinterest.com/ideas/jardinage/942773031901/", "language": "fr" }
+```
+
+**Pinterest URLs zu einem spanischen Keyword finden:**
+```json
+POST /api/find-interests-live
+{ "keyword": "decoración del hogar", "language": "es" }
+```
+
+**Interest per Name finden (italienisch):**
+```json
+POST /api/find-or-scrape-live
+{ "name": "cucina italiana", "language": "it" }
+```
+
+### Interne Endpoints
+
+Fuer die interne App. Lesen und/oder schreiben in die Datenbank.
+
+| Endpoint | Methode | DB Lesen | DB Schreiben | Beschreibung |
+|----------|---------|----------|-------------|-------------|
+| `/api/scrape` | POST | ✅ | ✅ | Scrapen und in DB speichern |
+| `/api/find-or-scrape` | POST | ✅ | ✅ | Erst DB durchsuchen, dann scrapen |
+| `/api/find-interests` | POST | ✅ | ❌ | Google-Suche + DB-Duplikat-Check |
+| `/api/discover-keywords` | POST | ✅ | ✅ | Keywords entdecken (Google + Scrape + DB) |
+| `/api/interests` | GET | ✅ | ❌ | Interests mit Pagination/Filter |
+| `/api/interests` | DELETE | ❌ | ✅ | Interests loeschen |
+| `/api/interests/{id}` | GET | ✅ | ❌ | Einzelnes Interest |
+| `/api/interests/{id}/pins` | GET | ✅ | ❌ | Pins aus DB |
+| `/api/interests/{id}/history` | GET | ✅ | ❌ | Suchvolumen-Verlauf |
+| `/api/pins` | GET | ✅ | ❌ | Alle Pins mit Pagination/Filter |
+| `/api/categories` | GET | ✅ | ❌ | Kategorien aus Breadcrumbs |
+| `/api/export` | POST | ✅ | ❌ | CSV Export |
+
+### AI Endpoints (kein DB-Zugriff)
+
+| Endpoint | Methode | Beschreibung |
+|----------|---------|-------------|
+| `/api/analyze-content` | POST | Content-Strategie via OpenAI |
+| `/api/cluster-keywords` | POST | Topical Map via OpenAI |
+| `/api/discover-topics` | POST | Sub-Topics generieren via OpenAI |
+| `/api/extract-keywords` | POST | Keywords aus Pin-Titeln via OpenAI |
+
+### Unterschied intern vs. extern am Beispiel
+
+| Aktion | Intern | Extern |
+|--------|--------|--------|
+| Idea scrapen | `POST /api/scrape` → scraped + speichert in DB | `POST /api/scrape-live` → scraped + gibt direkt zurueck |
+| Pins holen | `GET /api/interests/{id}/pins` → liest aus DB | `POST /api/pins-live` → scraped frisch (braucht URL statt ID) |
+| URLs finden | `POST /api/find-interests` → sucht + prueft DB-Duplikate | `POST /api/find-interests-live` → sucht + gibt alles zurueck |
+| Interest finden | `POST /api/find-or-scrape` → DB-Lookup zuerst | `POST /api/find-or-scrape-live` → scraped immer direkt |
 
 ---
 

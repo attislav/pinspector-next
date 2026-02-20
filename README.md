@@ -105,11 +105,48 @@ pinspector-next/
 
 ## API Endpunkte
 
-- `POST /api/scrape` - Pinterest Ideas URL scrapen
-- `GET /api/interests` - Interests mit Pagination/Filter
-- `DELETE /api/interests` - Interests löschen
-- `POST /api/find-interests` - Neue Interests über Google finden
-- `POST /api/export` - CSV Export
+Die API ist in zwei Bereiche aufgeteilt:
+
+### Externe Endpoints (`-live`)
+
+Für externe Konsumenten. Kein Datenbank-Zugriff — scrapen und liefern immer frische Daten direkt von Pinterest/Google.
+
+| Endpoint | Methode | Body | Beschreibung |
+|----------|---------|------|-------------|
+| `/api/scrape-live` | POST | `{ url, language? }` | Pinterest Ideas-Seite scrapen (Idea + Pins) |
+| `/api/pins-live` | POST | `{ url, language? }` | Nur Pins einer Ideas-Seite scrapen |
+| `/api/find-interests-live` | POST | `{ keyword, limit?, language? }` | Pinterest Ideas URLs via Google-Suche finden |
+| `/api/find-or-scrape-live` | POST | `{ name?, url?, language? }` | Interest per Name oder URL finden und scrapen |
+
+**Multi-Language Support:** Alle externen Endpoints unterstützen den `language` Parameter (`de`, `en`, `fr`, `es`, `it`, `pt`, `nl`). Sprache wird automatisch aus der URL erkannt, kann aber explizit überschrieben werden. Standard: `de`.
+
+### Interne Endpoints
+
+Für die interne App. Lesen und schreiben in die Datenbank.
+
+| Endpoint | Methode | Beschreibung |
+|----------|---------|-------------|
+| `/api/scrape` | POST | Pinterest scrapen und in DB speichern |
+| `/api/find-or-scrape` | POST | Erst DB durchsuchen, dann scrapen |
+| `/api/find-interests` | POST | Google-Suche + DB-Duplikat-Check |
+| `/api/discover-keywords` | POST | Keywords entdecken (Google + Scrape + DB) |
+| `/api/interests` | GET | Interests mit Pagination/Filter |
+| `/api/interests` | DELETE | Interests löschen |
+| `/api/interests/{id}` | GET | Einzelnes Interest |
+| `/api/interests/{id}/pins` | GET | Pins aus DB |
+| `/api/interests/{id}/history` | GET | Suchvolumen-Verlauf |
+| `/api/pins` | GET | Alle Pins mit Pagination/Filter |
+| `/api/categories` | GET | Kategorien aus Breadcrumbs |
+| `/api/export` | POST | CSV Export |
+
+### AI Endpoints (kein DB-Zugriff)
+
+| Endpoint | Methode | Beschreibung |
+|----------|---------|-------------|
+| `/api/analyze-content` | POST | Content-Strategie via OpenAI |
+| `/api/cluster-keywords` | POST | Topical Map via OpenAI |
+| `/api/discover-topics` | POST | Sub-Topics generieren via OpenAI |
+| `/api/extract-keywords` | POST | Keywords aus Pin-Titeln via OpenAI |
 
 ## License
 
