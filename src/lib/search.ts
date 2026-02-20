@@ -12,7 +12,12 @@ export interface SearchResult {
   breadcrumb: string | null;
 }
 
-export async function searchGoogle(query: string, maxResults: number = 20): Promise<SearchResult[]> {
+export interface SearchOptions {
+  locationCode?: number;
+  languageCode?: string;
+}
+
+export async function searchGoogle(query: string, maxResults: number = 20, options?: SearchOptions): Promise<SearchResult[]> {
   const login = process.env.DATAFORSEO_LOGIN;
   const password = process.env.DATAFORSEO_PASSWORD;
 
@@ -38,8 +43,8 @@ export async function searchGoogle(query: string, maxResults: number = 20): Prom
       body: JSON.stringify([
         {
           keyword: query,
-          location_code: 2276, // Germany
-          language_code: 'de',
+          location_code: options?.locationCode ?? 2276,
+          language_code: options?.languageCode ?? 'de',
           device: 'desktop',
           depth,
         },

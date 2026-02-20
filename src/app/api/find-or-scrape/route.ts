@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryOne } from '@/lib/db';
 import { scrapePinterestIdea } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb } from '@/lib/idea-persistence';
+import { getLanguageConfig } from '@/lib/language-config';
 
 export const maxDuration = 30;
 
@@ -13,7 +14,8 @@ interface DbIdea {
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, url } = await request.json();
+    const { name, url, language } = await request.json();
+    const langConfig = getLanguageConfig(language);
 
     if (!name && !url) {
       return NextResponse.json(
@@ -24,7 +26,9 @@ export async function POST(request: NextRequest) {
 
     // If URL is provided, scrape directly
     if (url) {
-      const scrapeResult = await scrapePinterestIdea(url);
+      const scrapeResult = await scrapePinterestIdea(url, {
+        acceptLanguage: langConfig.acceptLanguage,
+      });
       if (scrapeResult.success && scrapeResult.idea) {
         return NextResponse.json({
           success: true,
@@ -78,7 +82,7 @@ export async function POST(request: NextRequest) {
       .replace(/^-+|-+$/g, '');
 
     const urlsToTry = [
-      `https://www.pinterest.de/ideas/${slug}/`,
+      `https://${langConfig.pinterestFallbackDomain}/ideas/${slug}/`,
       `https://www.pinterest.com/ideas/${slug}/`,
     ];
 
@@ -94,7 +98,9 @@ export async function POST(request: NextRequest) {
         const finalUrl = response.url;
 
         if (finalUrl.match(/\/ideas\/[^/]+\/\d+/)) {
-          const scrapeResult = await scrapePinterestIdea(finalUrl);
+          const scrapeResult = await scrapePinterestIdea(finalUrl, {
+            acceptLanguage: langConfig.acceptLanguage,
+          });
           if (scrapeResult.success && scrapeResult.idea) {
             await saveIdeaToDb(scrapeResult.idea);
             return NextResponse.json({
