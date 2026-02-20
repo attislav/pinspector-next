@@ -8,6 +8,7 @@ export type SupportedLanguage = 'de' | 'en' | 'fr' | 'es' | 'it' | 'pt' | 'nl';
 export interface LanguageConfig {
   pinterestDomain: string;
   siteFilter: string;
+  siteFilterBroad: string;
   locationCode: number;
   languageCode: string;
   acceptLanguage: string;
@@ -18,6 +19,7 @@ const LANGUAGE_CONFIGS: Record<SupportedLanguage, LanguageConfig> = {
   de: {
     pinterestDomain: 'de.pinterest.com',
     siteFilter: 'site:de.pinterest.com/ideas',
+    siteFilterBroad: 'site:pinterest.com/ideas',
     locationCode: 2276,
     languageCode: 'de',
     acceptLanguage: 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -26,6 +28,7 @@ const LANGUAGE_CONFIGS: Record<SupportedLanguage, LanguageConfig> = {
   en: {
     pinterestDomain: 'www.pinterest.com',
     siteFilter: 'site:www.pinterest.com/ideas',
+    siteFilterBroad: 'site:pinterest.com/ideas',
     locationCode: 2840,
     languageCode: 'en',
     acceptLanguage: 'en-US,en;q=0.9',
@@ -34,6 +37,7 @@ const LANGUAGE_CONFIGS: Record<SupportedLanguage, LanguageConfig> = {
   fr: {
     pinterestDomain: 'fr.pinterest.com',
     siteFilter: 'site:fr.pinterest.com/ideas',
+    siteFilterBroad: 'site:pinterest.com/ideas',
     locationCode: 2250,
     languageCode: 'fr',
     acceptLanguage: 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -42,6 +46,7 @@ const LANGUAGE_CONFIGS: Record<SupportedLanguage, LanguageConfig> = {
   es: {
     pinterestDomain: 'es.pinterest.com',
     siteFilter: 'site:es.pinterest.com/ideas',
+    siteFilterBroad: 'site:pinterest.com/ideas',
     locationCode: 2724,
     languageCode: 'es',
     acceptLanguage: 'es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -50,6 +55,7 @@ const LANGUAGE_CONFIGS: Record<SupportedLanguage, LanguageConfig> = {
   it: {
     pinterestDomain: 'it.pinterest.com',
     siteFilter: 'site:it.pinterest.com/ideas',
+    siteFilterBroad: 'site:pinterest.com/ideas',
     locationCode: 2380,
     languageCode: 'it',
     acceptLanguage: 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -58,6 +64,7 @@ const LANGUAGE_CONFIGS: Record<SupportedLanguage, LanguageConfig> = {
   pt: {
     pinterestDomain: 'br.pinterest.com',
     siteFilter: 'site:br.pinterest.com/ideas',
+    siteFilterBroad: 'site:pinterest.com/ideas',
     locationCode: 2076,
     languageCode: 'pt',
     acceptLanguage: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -66,6 +73,7 @@ const LANGUAGE_CONFIGS: Record<SupportedLanguage, LanguageConfig> = {
   nl: {
     pinterestDomain: 'nl.pinterest.com',
     siteFilter: 'site:nl.pinterest.com/ideas',
+    siteFilterBroad: 'site:pinterest.com/ideas',
     locationCode: 2528,
     languageCode: 'nl',
     acceptLanguage: 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',

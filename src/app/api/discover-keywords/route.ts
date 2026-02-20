@@ -32,24 +32,40 @@ export async function POST(request: NextRequest) {
 
     // 1. Search for Pinterest Ideas URLs
     const langConfig = getLanguageConfig(language);
-    const fullQuery = `${langConfig.siteFilter} ${keyword}`;
     let urls: string[] = [];
+    const seenUrls = new Set<string>();
 
-    try {
-      const results = await searchGoogle(fullQuery, limit * 2, {
-        locationCode: langConfig.locationCode,
-        languageCode: langConfig.languageCode,
-      });
-
+    const collectUrls = (results: { url: string }[]) => {
       for (const result of results) {
         const url = result.url;
-        if (url && url.includes('/ideas/') && isValidPinterestIdeasUrl(url) && !urls.includes(url)) {
+        if (url && url.includes('/ideas/') && isValidPinterestIdeasUrl(url) && !seenUrls.has(url)) {
+          seenUrls.add(url);
           urls.push(url);
         }
         if (urls.length >= limit) break;
       }
+    };
+
+    try {
+      // Narrow search with locale-specific filter
+      const narrowQuery = `${langConfig.siteFilter} ${keyword}`;
+      const narrowResults = await searchGoogle(narrowQuery, limit * 3, {
+        locationCode: langConfig.locationCode,
+        languageCode: langConfig.languageCode,
+      });
+      collectUrls(narrowResults);
+
+      // Broader fallback if not enough results
+      if (urls.length < limit) {
+        const broadQuery = `${langConfig.siteFilterBroad} ${keyword}`;
+        const broadResults = await searchGoogle(broadQuery, limit * 3, {
+          locationCode: langConfig.locationCode,
+          languageCode: langConfig.languageCode,
+        });
+        collectUrls(broadResults);
+      }
     } catch (searchError) {
-      console.error('DuckDuckGo search error:', searchError);
+      console.error('Search error:', searchError);
       const message = searchError instanceof Error ? searchError.message : 'Suchfehler';
       if (message.includes('Rate-Limit') || message.includes('429')) {
         return NextResponse.json(
@@ -191,8 +207,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Discover keywords error:', error);
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
     return NextResponse.json(
-      { error: 'Interner Serverfehler' },
+      { error: `Discover-Fehler: ${message}` },
       { status: 500 }
     );
   }

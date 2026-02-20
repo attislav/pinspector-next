@@ -1,10 +1,11 @@
 import { Idea, RelatedInterest, ScrapeResult, Pin, KlpPivot } from '@/types/database';
 
-// User agents for rotation
+// User agents for rotation (keep these up-to-date with current browser versions)
 const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
 ];
 
 function getRandomUserAgent(): string {
@@ -66,10 +67,18 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
       response = await fetch(normalizedUrl, {
         headers: {
           'User-Agent': getRandomUserAgent(),
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
           'Accept-Language': options?.acceptLanguage ?? 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Upgrade-Insecure-Requests': '1',
+          'DNT': '1',
         },
         cache: 'no-store',
+        redirect: 'follow',
         signal: controller.signal,
       });
     } catch (fetchError) {
@@ -83,31 +92,79 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
     }
 
     if (!response.ok) {
+      if (response.status === 403) {
+        return { success: false, error: 'Pinterest hat die Anfrage blockiert (403 Forbidden). Möglicherweise Bot-Erkennung.' };
+      }
+      if (response.status === 429) {
+        return { success: false, error: 'Pinterest Rate-Limit erreicht (429). Bitte später erneut versuchen.' };
+      }
       return { success: false, error: `HTTP Error: ${response.status}` };
+    }
+
+    // Check if we were redirected to a login or challenge page
+    const finalUrl = response.url;
+    if (finalUrl && (finalUrl.includes('/login') || finalUrl.includes('/challenge'))) {
+      return { success: false, error: 'Pinterest hat auf Login/Challenge umgeleitet. Seite nicht öffentlich zugänglich.' };
     }
 
     const html = await response.text();
 
-    // Extract JSON from __PWS_INITIAL_PROPS__ script tag
-    const scriptMatch = html.match(
+    // Try multiple script tags: Pinterest uses __PWS_INITIAL_PROPS__ or __PWS_DATA__
+    let scriptMatch = html.match(
       /<script id="__PWS_INITIAL_PROPS__"[^>]*>(.*?)<\/script>/s
     );
+    let dataSource = '__PWS_INITIAL_PROPS__';
 
     if (!scriptMatch) {
-      return { success: false, error: 'Keine Pinterest-Daten gefunden (PWS_INITIAL_PROPS fehlt)' };
+      scriptMatch = html.match(
+        /<script id="__PWS_DATA__"[^>]*>(.*?)<\/script>/s
+      );
+      dataSource = '__PWS_DATA__';
+    }
+
+    if (!scriptMatch) {
+      // Check if we got a challenge page or login redirect
+      const isChallenge = html.includes('challenge') || html.includes('login');
+      const isBlocked = html.includes('blocked') || html.includes('captcha');
+      if (isChallenge) {
+        return { success: false, error: 'Pinterest verlangt eine Challenge/Login-Verifizierung' };
+      }
+      if (isBlocked) {
+        return { success: false, error: 'Pinterest hat die Anfrage blockiert (Bot-Erkennung)' };
+      }
+      return { success: false, error: 'Keine Pinterest-Daten gefunden (weder PWS_INITIAL_PROPS noch PWS_DATA vorhanden)' };
     }
 
     let jsonData: any;
     try {
       jsonData = JSON.parse(scriptMatch[1]);
     } catch (e) {
-      return { success: false, error: 'Fehler beim Parsen der Pinterest-Daten' };
+      return { success: false, error: `Fehler beim Parsen der Pinterest-Daten (${dataSource})` };
     }
 
-    // Navigate to InterestResource
-    const resources = jsonData?.initialReduxState?.resources;
+    // Navigate to InterestResource - try multiple data paths
+    // Path 1: jsonData.initialReduxState.resources (from __PWS_INITIAL_PROPS__)
+    // Path 2: jsonData.props.initialReduxState.resources (from __PWS_DATA__)
+    // Path 3: jsonData.props.context.initialReduxState.resources (newer format)
+    const reduxState = jsonData?.initialReduxState
+      || jsonData?.props?.initialReduxState
+      || jsonData?.props?.context?.initialReduxState;
+
+    if (!reduxState) {
+      return { success: false, error: `Pinterest Redux-State nicht gefunden in ${dataSource} (geprüfte Pfade: initialReduxState, props.initialReduxState, props.context.initialReduxState)` };
+    }
+
+    const resources = reduxState?.resources;
     if (!resources?.InterestResource) {
-      return { success: false, error: 'InterestResource nicht gefunden' };
+      // Try alternative resource names
+      const interestRes = resources?.InterestResource
+        || resources?.InterestPageResource
+        || resources?.TopicResource;
+      if (!interestRes) {
+        const availableResources = resources ? Object.keys(resources).join(', ') : 'keine';
+        return { success: false, error: `InterestResource nicht gefunden. Verfügbare Resources: ${availableResources}` };
+      }
+      resources.InterestResource = interestRes;
     }
 
     // Get the first (and usually only) key in InterestResource
@@ -158,7 +215,7 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
       }));
 
     // Extract annotations from pins
-    const pins = jsonData?.initialReduxState?.pins || {};
+    const pins = reduxState?.pins || {};
     const annotationCounts = new Map<string, { count: number; url: string }>();
 
     for (const pin of Object.values(pins) as any[]) {
