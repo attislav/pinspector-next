@@ -4,7 +4,7 @@ import { searchGoogle } from '@/lib/search';
 import { isValidPinterestIdeasUrl } from '@/lib/pinterest-scraper';
 import { getLanguageConfig } from '@/lib/language-config';
 
-export const maxDuration = 30;
+export const maxDuration = 45;
 
 interface FoundInterest {
   url: string;
