@@ -3,6 +3,7 @@ import { query } from '@/lib/db';
 import { searchGoogle } from '@/lib/search';
 import { scrapePinterestIdea, isValidPinterestIdeasUrl, extractIdFromUrl } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
+import { getLanguageConfig } from '@/lib/language-config';
 
 export const maxDuration = 60;
 
@@ -20,7 +21,7 @@ interface ScrapedIdea {
 
 export async function POST(request: NextRequest) {
   try {
-    const { keyword, limit = 10, scrapeLimit = 5, skipExisting = true } = await request.json();
+    const { keyword, limit = 10, scrapeLimit = 5, skipExisting = true, language } = await request.json();
 
     if (!keyword) {
       return NextResponse.json(
@@ -29,12 +30,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. DuckDuckGo search for Pinterest Ideas URLs
-    const fullQuery = `site:de.pinterest.com/ideas ${keyword}`;
+    // 1. Search for Pinterest Ideas URLs
+    const langConfig = getLanguageConfig(language);
+    const fullQuery = `${langConfig.siteFilter} ${keyword}`;
     let urls: string[] = [];
 
     try {
-      const results = await searchGoogle(fullQuery, limit * 2);
+      const results = await searchGoogle(fullQuery, limit * 2, {
+        locationCode: langConfig.locationCode,
+        languageCode: langConfig.languageCode,
+      });
 
       for (const result of results) {
         const url = result.url;
@@ -94,7 +99,9 @@ export async function POST(request: NextRequest) {
       const url = urlsToScrape[i];
 
       try {
-        const result = await scrapePinterestIdea(url);
+        const result = await scrapePinterestIdea(url, {
+          acceptLanguage: langConfig.acceptLanguage,
+        });
 
         if (result.success && result.idea) {
           const idea = result.idea;

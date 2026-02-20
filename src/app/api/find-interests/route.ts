@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { searchGoogle, SearchResult } from '@/lib/search';
+import { searchGoogle } from '@/lib/search';
 import { isValidPinterestIdeasUrl } from '@/lib/pinterest-scraper';
+import { getLanguageConfig } from '@/lib/language-config';
 
 export const maxDuration = 30;
 
@@ -11,9 +12,13 @@ interface FoundInterest {
   breadcrumb: string | null;
 }
 
-async function findPinterestUrls(searchQuery: string, limit: number = 20): Promise<FoundInterest[]> {
-  const fullQuery = `site:de.pinterest.com/ideas ${searchQuery}`;
-  const results = await searchGoogle(fullQuery, limit * 2);
+async function findPinterestUrls(searchQuery: string, limit: number = 20, language?: string): Promise<FoundInterest[]> {
+  const langConfig = getLanguageConfig(language);
+  const fullQuery = `${langConfig.siteFilter} ${searchQuery}`;
+  const results = await searchGoogle(fullQuery, limit * 2, {
+    locationCode: langConfig.locationCode,
+    languageCode: langConfig.languageCode,
+  });
 
   const found: FoundInterest[] = [];
   const seenUrls = new Set<string>();
@@ -36,7 +41,7 @@ async function findPinterestUrls(searchQuery: string, limit: number = 20): Promi
 
 export async function POST(request: NextRequest) {
   try {
-    const { keyword, limit = 20, includeExisting = false } = await request.json();
+    const { keyword, limit = 20, includeExisting = false, language } = await request.json();
 
     if (!keyword) {
       return NextResponse.json(
@@ -48,7 +53,7 @@ export async function POST(request: NextRequest) {
     // Search for Pinterest Ideas URLs
     let found: FoundInterest[] = [];
     try {
-      found = await findPinterestUrls(keyword, limit);
+      found = await findPinterestUrls(keyword, limit, language);
     } catch (searchError) {
       console.error('Search error:', searchError);
       const message = searchError instanceof Error ? searchError.message : 'Suchfehler';

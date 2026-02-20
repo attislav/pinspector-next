@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryOne } from '@/lib/db';
 import { scrapePinterestIdea, extractIdFromUrl } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
+import { getLanguageConfig } from '@/lib/language-config';
 
 export const maxDuration = 30;
 
@@ -14,7 +15,8 @@ interface DbIdea {
 
 export async function POST(request: NextRequest) {
   try {
-    const { url, skipIfRecent } = await request.json();
+    const { url, skipIfRecent, language } = await request.json();
+    const langConfig = getLanguageConfig(language);
 
     if (!url) {
       return NextResponse.json(
@@ -51,7 +53,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Scrape the Pinterest page
-    const scrapeResult = await scrapePinterestIdea(url);
+    const scrapeResult = await scrapePinterestIdea(url, {
+      acceptLanguage: langConfig.acceptLanguage,
+    });
 
     if (!scrapeResult.success || !scrapeResult.idea) {
       return NextResponse.json(scrapeResult, { status: 400 });

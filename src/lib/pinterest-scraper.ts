@@ -28,8 +28,12 @@ function normalizeUrl(url: string): string {
             .replace(/https?:\/\/pinterest\.com/, 'https://www.pinterest.com');
 }
 
+export interface ScrapeOptions {
+  acceptLanguage?: string;
+}
+
 // Parse Pinterest Ideas page and extract data
-export async function scrapePinterestIdea(url: string): Promise<ScrapeResult> {
+export async function scrapePinterestIdea(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
   try {
     // Normalize URL
     if (!url.startsWith('http')) {
@@ -58,7 +62,7 @@ export async function scrapePinterestIdea(url: string): Promise<ScrapeResult> {
         headers: {
           'User-Agent': getRandomUserAgent(),
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept-Language': options?.acceptLanguage ?? 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
         },
         cache: 'no-store',
         signal: controller.signal,
@@ -306,11 +310,11 @@ export async function scrapePinterestIdea(url: string): Promise<ScrapeResult> {
 }
 
 // Batch scrape multiple URLs with rate limiting
-export async function scrapeBatch(urls: string[]): Promise<ScrapeResult[]> {
+export async function scrapeBatch(urls: string[], options?: ScrapeOptions): Promise<ScrapeResult[]> {
   const results: ScrapeResult[] = [];
 
   for (let i = 0; i < urls.length; i++) {
-    const result = await scrapePinterestIdea(urls[i]);
+    const result = await scrapePinterestIdea(urls[i], options);
     results.push(result);
 
     // Rate limiting: 2-3 seconds between requests
