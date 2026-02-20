@@ -86,4 +86,19 @@ export function getLanguageConfig(lang?: string): LanguageConfig {
   return LANGUAGE_CONFIGS.de;
 }
 
+/**
+ * Detect language from a Pinterest URL domain.
+ * E.g. "fr.pinterest.com" → "fr", "br.pinterest.com" → "pt", "www.pinterest.com" → "en"
+ */
+export function detectLanguageFromUrl(url: string): SupportedLanguage | null {
+  const subdomainMatch = url.match(/https?:\/\/([a-z]{2})\.pinterest\.com/);
+  if (subdomainMatch) {
+    const subdomain = subdomainMatch[1];
+    if (subdomain === 'br') return 'pt';
+    if (isSupportedLanguage(subdomain)) return subdomain;
+  }
+  if (/https?:\/\/www\.pinterest\.com/.test(url)) return 'en';
+  return null;
+}
+
 export { SUPPORTED_LANGUAGES };

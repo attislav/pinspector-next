@@ -101,6 +101,7 @@ export async function POST(request: NextRequest) {
       try {
         const result = await scrapePinterestIdea(url, {
           acceptLanguage: langConfig.acceptLanguage,
+          pinterestDomain: langConfig.pinterestDomain,
         });
 
         if (result.success && result.idea) {
