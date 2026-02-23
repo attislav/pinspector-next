@@ -46,6 +46,7 @@ export interface Pin {
   annotations: string[];
   pin_created_at: string | null;  // When pin was created on Pinterest
   domain: string | null;  // Domain of the original pin source
+  board_name: string | null;  // Board name where pin was pinned
   last_scrape: string;
   created_at: string;
 }

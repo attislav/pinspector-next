@@ -131,6 +131,7 @@ export function PinsTable({
               <th className="text-center py-3 px-2"><button onClick={() => onSort('position')} className="flex items-center gap-1 font-semibold text-gray-700 hover:text-red-700" title="Position"># <SortIcon column="position" sortBy={pinSortBy} sortOrder={pinSortOrder} /></button></th>
               <th className="text-left py-3 px-2 font-semibold text-gray-700">Bild</th>
               <th className="text-left py-3 px-2"><button onClick={() => onSort('title')} className="flex items-center gap-1 font-semibold text-gray-700 hover:text-red-700">Titel <SortIcon column="title" sortBy={pinSortBy} sortOrder={pinSortOrder} /></button></th>
+              <th className="text-left py-3 px-2 font-semibold text-gray-700">Board</th>
               <th className="text-left py-3 px-2 font-semibold text-gray-700">Domain</th>
               <th className="text-left py-3 px-2 font-semibold text-gray-700">Beschreibung</th>
               <th className="text-left py-3 px-2"><button onClick={() => onSort('pin_created_at')} className="flex items-center gap-1 font-semibold text-gray-700 hover:text-red-700 text-xs">Erstellt <SortIcon column="pin_created_at" sortBy={pinSortBy} sortOrder={pinSortOrder} /></button></th>
@@ -156,6 +157,7 @@ export function PinsTable({
                   </div>
                 </td>
                 <td className="py-2 px-2 max-w-[180px]"><span className="line-clamp-2 text-gray-900 cursor-help" title={pin.title || ''}>{pin.title || '-'}</span></td>
+                <td className="py-2 px-2 text-gray-600 text-xs max-w-[150px]"><span className="line-clamp-2 cursor-help" title={pin.board_name || ''}>{pin.board_name || '-'}</span></td>
                 <td className="py-2 px-2 text-gray-600 text-xs">{pin.domain || '-'}</td>
                 <td className="py-2 px-2 max-w-[200px]"><span className="line-clamp-2 text-gray-600 text-xs cursor-help" title={pin.description || ''}>{pin.description || '-'}</span></td>
                 <td className="py-2 px-2 text-gray-500 whitespace-nowrap text-xs">{formatPinDate(pin.pin_created_at)}</td>
@@ -203,6 +205,7 @@ export function PinsTable({
                   </div>
                 </div>
                 <p className="text-sm font-medium text-gray-900 line-clamp-2 mt-1">{pin.title || '-'}</p>
+                {pin.board_name && <p className="text-xs text-gray-500 mt-0.5">Board: {pin.board_name}</p>}
                 {pin.domain && <p className="text-xs text-gray-500 mt-0.5">{pin.domain}</p>}
               </div>
             </div>
