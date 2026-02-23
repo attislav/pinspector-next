@@ -62,7 +62,30 @@ export function useIdeaDetail(id: string) {
         fetchWithTimeout(`/api/interests/${id}/history`),
         fetchWithTimeout(`/api/interests/${id}/pins`),
       ]);
-      if (!ideaRes.ok) { setError('Idea nicht gefunden'); return; }
+      if (!ideaRes.ok) {
+        // Interest not in DB — try auto-scraping from Pinterest
+        if (/^\d+$/.test(id)) {
+          const scrapeUrl = `https://www.pinterest.de/ideas/_/${id}/`;
+          try {
+            const scrapeRes = await fetchWithTimeout('/api/scrape', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: scrapeUrl }),
+            });
+            const scrapeResult = await scrapeRes.json();
+            if (scrapeResult.success && scrapeResult.idea) {
+              setIdea(scrapeResult.idea);
+              setPins(scrapeResult.pins || []);
+              setHistory([]);
+              return;
+            }
+          } catch {
+            // Auto-scrape failed, fall through to error
+          }
+        }
+        setError('Idea nicht gefunden');
+        return;
+      }
       const ideaData = await ideaRes.json();
       const historyData = await historyRes.json();
       const pinsData = await pinsRes.json();
