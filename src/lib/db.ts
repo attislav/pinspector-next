@@ -22,13 +22,26 @@ export function getPool(): Pool {
   return pool;
 }
 
-// Auto-migrate: add missing columns on first query
+// Auto-migrate: run pending migrations tracked in DB
 async function ensureMigrations(): Promise<void> {
   if (migrated) return;
   migrated = true;
   try {
     const p = getPool();
-    await p.query(`ALTER TABLE pins ADD COLUMN IF NOT EXISTS board_name TEXT`);
+    // Create migrations tracking table if it doesn't exist
+    await p.query(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT NOW())`);
+    // Define all migrations
+    const migrations: [string, string][] = [
+      ['006_add_board_name', `ALTER TABLE pins ADD COLUMN IF NOT EXISTS board_name TEXT`],
+    ];
+    for (const [name, sql] of migrations) {
+      const exists = await p.query(`SELECT 1 FROM _migrations WHERE name = $1`, [name]);
+      if (exists.rows.length === 0) {
+        await p.query(sql);
+        await p.query(`INSERT INTO _migrations (name) VALUES ($1)`, [name]);
+        console.log(`Migration applied: ${name}`);
+      }
+    }
   } catch (err) {
     console.error('Auto-migration failed:', err);
   }
