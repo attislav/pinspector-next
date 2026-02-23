@@ -324,6 +324,9 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
         // Extract domain
         const domain = pin?.domain || null;
 
+        // Extract board name
+        const boardName = pin?.board?.name || null;
+
         return {
           id: pin?.id || '',
           title: pin?.title || pin?.grid_title || null,
@@ -338,6 +341,7 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
           annotations: pinAnnotations.slice(0, 10), // Limit to 10 annotations per pin
           pin_created_at: pinCreatedAt,
           domain: domain,
+          board_name: boardName,
           last_scrape: now,
           created_at: now,
         };

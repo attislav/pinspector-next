@@ -121,8 +121,8 @@ export async function savePinsToDb(ideaId: string, pins: Pin[]): Promise<void> {
 
     // Upsert pin (insert or update if exists)
     await query(
-      `INSERT INTO public.pins (id, title, description, image_url, image_thumbnail_url, link, article_url, repin_count, save_count, comment_count, annotations, pin_created_at, domain, last_scrape)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+      `INSERT INTO public.pins (id, title, description, image_url, image_thumbnail_url, link, article_url, repin_count, save_count, comment_count, annotations, pin_created_at, domain, board_name, last_scrape)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
        ON CONFLICT (id) DO UPDATE SET
          title = EXCLUDED.title,
          description = EXCLUDED.description,
@@ -136,6 +136,7 @@ export async function savePinsToDb(ideaId: string, pins: Pin[]): Promise<void> {
          annotations = EXCLUDED.annotations,
          pin_created_at = EXCLUDED.pin_created_at,
          domain = EXCLUDED.domain,
+         board_name = EXCLUDED.board_name,
          last_scrape = NOW()`,
       [
         pin.id,
@@ -151,6 +152,7 @@ export async function savePinsToDb(ideaId: string, pins: Pin[]): Promise<void> {
         pin.annotations || [],
         pin.pin_created_at,
         pin.domain,
+        pin.board_name,
       ]
     );
 
