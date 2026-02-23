@@ -258,6 +258,15 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
     // Extract Pins (up to 20)
     const now = new Date().toISOString();
     let pinIndex = 0;
+    // Log first pin's board-related keys for debugging
+    const firstPin = Object.values(pins as Record<string, any>)[0];
+    if (firstPin) {
+      const boardKeys = Object.keys(firstPin).filter(k =>
+        k.includes('board') || k.includes('pinner') || k.includes('creator')
+      );
+      console.log('Pinterest pin board-related keys:', boardKeys);
+      if (firstPin.board) console.log('Pinterest pin.board keys:', Object.keys(firstPin.board));
+    }
     const extractedPins: Pin[] = Object.values(pins as Record<string, any>)
       .slice(0, 20)
       .map((pin: any) => {
@@ -324,8 +333,12 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
         // Extract domain
         const domain = pin?.domain || null;
 
-        // Extract board name
-        const boardName = pin?.board?.name || null;
+        // Extract board name (try multiple Pinterest data paths)
+        const boardName = pin?.board?.name
+          || pin?.board?.title
+          || pin?.pin_join?.board?.name
+          || pin?.native_creator?.board_name
+          || null;
 
         return {
           id: pin?.id || '',

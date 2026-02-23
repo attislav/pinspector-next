@@ -1,7 +1,8 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 
 // PostgreSQL connection pool
 let pool: Pool | null = null;
+let migrated = false;
 
 export function getPool(): Pool {
   if (!pool) {
@@ -21,8 +22,35 @@ export function getPool(): Pool {
   return pool;
 }
 
+// Auto-migrate: run pending migrations tracked in DB
+async function ensureMigrations(): Promise<void> {
+  if (migrated) return;
+  migrated = true;
+  try {
+    const p = getPool();
+    // Create migrations tracking table if it doesn't exist
+    await p.query(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT NOW())`);
+    // Define all migrations
+    const migrations: [string, string][] = [
+      ['005_add_domain', `ALTER TABLE pins ADD COLUMN IF NOT EXISTS domain TEXT`],
+      ['006_add_board_name', `ALTER TABLE pins ADD COLUMN IF NOT EXISTS board_name TEXT`],
+    ];
+    for (const [name, sql] of migrations) {
+      const exists = await p.query(`SELECT 1 FROM _migrations WHERE name = $1`, [name]);
+      if (exists.rows.length === 0) {
+        await p.query(sql);
+        await p.query(`INSERT INTO _migrations (name) VALUES ($1)`, [name]);
+        console.log(`Migration applied: ${name}`);
+      }
+    }
+  } catch (err) {
+    console.error('Auto-migration failed:', err);
+  }
+}
+
 // Helper function to execute queries
 export async function query<T>(text: string, params?: unknown[]): Promise<T[]> {
+  await ensureMigrations();
   const pool = getPool();
   const result = await pool.query(text, params);
   return result.rows as T[];
@@ -32,4 +60,22 @@ export async function query<T>(text: string, params?: unknown[]): Promise<T[]> {
 export async function queryOne<T>(text: string, params?: unknown[]): Promise<T | null> {
   const rows = await query<T>(text, params);
   return rows[0] || null;
+}
+
+// Run multiple queries in a transaction (all succeed or all rollback)
+export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  await ensureMigrations();
+  const p = getPool();
+  const client = await p.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
