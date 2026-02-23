@@ -1,4 +1,4 @@
-import { query, queryOne } from '@/lib/db';
+import { query, queryOne, withTransaction } from '@/lib/db';
 import { Idea, Pin } from '@/types/database';
 
 interface DbIdea {
@@ -81,12 +81,10 @@ export async function saveIdeaToDb(idea: Idea): Promise<{ isNew: boolean; isDupl
 
 /**
  * Save pins to the database and create idea_pins relationships.
+ * Uses a transaction so DELETE + INSERT is atomic (all or nothing).
  */
 export async function savePinsToDb(ideaId: string, pins: Pin[]): Promise<void> {
   if (!pins || pins.length === 0) return;
-
-  // Delete existing idea_pins relationships for this idea
-  await query('DELETE FROM public.idea_pins WHERE idea_id = $1', [ideaId]);
 
   // Collect all unique annotations from all pins to find matching interests
   const allAnnotations = new Set<string>();
@@ -115,68 +113,74 @@ export async function savePinsToDb(ideaId: string, pins: Pin[]): Promise<void> {
     interestMap.set(interest.name, interest.id);
   }
 
-  // Upsert pins and create relationships
-  for (let i = 0; i < pins.length; i++) {
-    const pin = pins[i];
+  // Run DELETE + all INSERTs in a transaction: if anything fails, everything rolls back
+  await withTransaction(async (client) => {
+    // Delete existing idea_pins relationships for this idea
+    await client.query('DELETE FROM public.idea_pins WHERE idea_id = $1', [ideaId]);
 
-    // Upsert pin (insert or update if exists)
-    await query(
-      `INSERT INTO public.pins (id, title, description, image_url, image_thumbnail_url, link, article_url, repin_count, save_count, comment_count, annotations, pin_created_at, domain, board_name, last_scrape)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         title = EXCLUDED.title,
-         description = EXCLUDED.description,
-         image_url = EXCLUDED.image_url,
-         image_thumbnail_url = EXCLUDED.image_thumbnail_url,
-         link = EXCLUDED.link,
-         article_url = EXCLUDED.article_url,
-         repin_count = EXCLUDED.repin_count,
-         save_count = EXCLUDED.save_count,
-         comment_count = EXCLUDED.comment_count,
-         annotations = EXCLUDED.annotations,
-         pin_created_at = EXCLUDED.pin_created_at,
-         domain = EXCLUDED.domain,
-         board_name = EXCLUDED.board_name,
-         last_scrape = NOW()`,
-      [
-        pin.id,
-        pin.title,
-        pin.description,
-        pin.image_url,
-        pin.image_thumbnail_url,
-        pin.link,
-        pin.article_url,
-        pin.repin_count || 0,
-        pin.save_count || 0,
-        pin.comment_count || 0,
-        pin.annotations || [],
-        pin.pin_created_at,
-        pin.domain,
-        pin.board_name,
-      ]
-    );
+    // Upsert pins and create relationships
+    for (let i = 0; i < pins.length; i++) {
+      const pin = pins[i];
 
-    // Create idea_pins relationship with position for the current idea
-    await query(
-      `INSERT INTO public.idea_pins (idea_id, pin_id, position) VALUES ($1, $2, $3)
-       ON CONFLICT (idea_id, pin_id) DO UPDATE SET position = EXCLUDED.position`,
-      [ideaId, pin.id, i]
-    );
+      // Upsert pin (insert or update if exists)
+      await client.query(
+        `INSERT INTO public.pins (id, title, description, image_url, image_thumbnail_url, link, article_url, repin_count, save_count, comment_count, annotations, pin_created_at, domain, board_name, last_scrape)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+         ON CONFLICT (id) DO UPDATE SET
+           title = EXCLUDED.title,
+           description = EXCLUDED.description,
+           image_url = EXCLUDED.image_url,
+           image_thumbnail_url = EXCLUDED.image_thumbnail_url,
+           link = EXCLUDED.link,
+           article_url = EXCLUDED.article_url,
+           repin_count = EXCLUDED.repin_count,
+           save_count = EXCLUDED.save_count,
+           comment_count = EXCLUDED.comment_count,
+           annotations = EXCLUDED.annotations,
+           pin_created_at = EXCLUDED.pin_created_at,
+           domain = EXCLUDED.domain,
+           board_name = EXCLUDED.board_name,
+           last_scrape = NOW()`,
+        [
+          pin.id,
+          pin.title,
+          pin.description,
+          pin.image_url,
+          pin.image_thumbnail_url,
+          pin.link,
+          pin.article_url,
+          pin.repin_count || 0,
+          pin.save_count || 0,
+          pin.comment_count || 0,
+          pin.annotations || [],
+          pin.pin_created_at,
+          pin.domain,
+          pin.board_name,
+        ]
+      );
 
-    // Also create relationships for matching annotations
-    if (pin.annotations) {
-      for (const annotation of pin.annotations) {
-        const matchingIdeaId = interestMap.get(annotation.toLowerCase());
-        if (matchingIdeaId && matchingIdeaId !== ideaId) {
-          await query(
-            `INSERT INTO public.idea_pins (idea_id, pin_id, position) VALUES ($1, $2, -1)
-             ON CONFLICT (idea_id, pin_id) DO NOTHING`,
-            [matchingIdeaId, pin.id]
-          );
+      // Create idea_pins relationship with position for the current idea
+      await client.query(
+        `INSERT INTO public.idea_pins (idea_id, pin_id, position) VALUES ($1, $2, $3)
+         ON CONFLICT (idea_id, pin_id) DO UPDATE SET position = EXCLUDED.position`,
+        [ideaId, pin.id, i]
+      );
+
+      // Also create relationships for matching annotations
+      if (pin.annotations) {
+        for (const annotation of pin.annotations) {
+          const matchingIdeaId = interestMap.get(annotation.toLowerCase());
+          if (matchingIdeaId && matchingIdeaId !== ideaId) {
+            await client.query(
+              `INSERT INTO public.idea_pins (idea_id, pin_id, position) VALUES ($1, $2, -1)
+               ON CONFLICT (idea_id, pin_id) DO NOTHING`,
+              [matchingIdeaId, pin.id]
+            );
+          }
         }
       }
     }
-  }
+  });
 }
 
 /**
