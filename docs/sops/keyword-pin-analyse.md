@@ -4,145 +4,289 @@
 
 ---
 
-## SOP 1: Keyword-Analyse (KLP Pivots, Related Interests, Top Annotations + Suchvolumen)
+## SOP 1: Keyword-Analyse
 
 **Ziel:** Für ein Keyword eine Liste verwandter Keywords (KLP Pivots, Related Interests, Top Annotations) mit jeweiligem Suchvolumen erhalten.
 
-### Schritt 1 – Haupt-Keyword scrapen
+**Endpunkt:** `POST https://pinspector-next.vercel.app/api/find-or-scrape-live`
 
+---
+
+### Schritt 1 – Haupt-Keyword abfragen
+
+Folgenden Request absenden (z.B. via curl, Postman oder ein beliebiges HTTP-Tool):
+
+```bash
+curl -X POST https://pinspector-next.vercel.app/api/find-or-scrape-live \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "häkeln anfänger",
+    "language": "de"
+  }'
 ```
-POST /api/find-or-scrape-live
-Content-Type: application/json
 
+**Parameter:**
+| Parameter | Typ | Pflicht | Beschreibung |
+|-----------|-----|---------|--------------|
+| `name` | String | Ja | Das Keyword, das analysiert werden soll |
+| `language` | String | Nein | Sprachcode: `de`, `en`, `fr`, `es`, `it`, `pt`, `nl`. Standard: `de` |
+
+**Beispiel-Response (gekürzt):**
+
+```json
 {
-  "name": "dein keyword",
-  "language": "de"
+  "success": true,
+  "idea": {
+    "id": "987654321",
+    "name": "häkeln anfänger",
+    "searches": 14800,
+    "url": "https://de.pinterest.com/ideas/häkeln-anfänger/987654321/",
+    "klp_pivots": [
+      { "name": "häkeln lernen", "url": "https://de.pinterest.com/ideas/häkeln-lernen/123/" },
+      { "name": "einfache häkelmuster", "url": "https://de.pinterest.com/ideas/einfache-häkelmuster/456/" },
+      { "name": "häkeln ideen", "url": "https://de.pinterest.com/ideas/häkeln-ideen/789/" }
+    ],
+    "related_interests": [
+      { "name": "stricken anfänger", "url": "https://de.pinterest.com/ideas/stricken-anfänger/111/" },
+      { "name": "makramee anfänger", "url": "https://de.pinterest.com/ideas/makramee-anfänger/222/" }
+    ]
+  },
+  "pins": [
+    {
+      "title": "Einfache Häkelanleitung für Anfänger",
+      "annotations": ["häkeln", "diy", "handarbeit", "wolle"],
+      "save_count": 1200,
+      "repin_count": 980,
+      "comment_count": 45
+    }
+  ],
+  "source": "scraped"
 }
 ```
 
-**Response enthält:**
-- `idea.searches` → Suchvolumen des Haupt-Keywords
-- `idea.related_interests` → Liste verwandter Interessen (`name`, `url`)
-- `idea.klp_pivots` → Bubble-Keywords (`name`, `url`)
-- `pins[].annotations` → Top Annotations (aus den Pins extrahiert)
+### Schritt 2 – Verwandte Keywords aus der Response sammeln
 
-### Schritt 2 – Verwandte Keywords sammeln
+Aus der Response drei Listen extrahieren:
 
-Aus der Response alle Keywords extrahieren:
-
-| Quelle | Feld | Format |
-|--------|------|--------|
-| KLP Pivots | `idea.klp_pivots` | `[{name, url}]` |
-| Related Interests | `idea.related_interests` | `[{name, url}]` |
-| Top Annotations | `pins[].annotations` | Strings aus allen Pins sammeln, Häufigkeit zählen |
-
-### Schritt 3 – Suchvolumen pro Keyword abrufen
-
-Für jedes verwandte Keyword aus Schritt 2 einzeln aufrufen:
-
+**a) KLP Pivots** → Feld `idea.klp_pivots`
 ```
-POST /api/find-or-scrape-live
-Content-Type: application/json
-
-{
-  "name": "verwandtes keyword",
-  "language": "de"
-}
+häkeln lernen
+einfache häkelmuster
+häkeln ideen
 ```
 
-→ `idea.searches` = Suchvolumen dieses Keywords.
-
-> **Hinweis:** Pro Keyword ein separater Call nötig. Bei vielen Keywords Aufrufe sequentiell mit kurzer Pause (2-3s) ausführen, um Rate-Limits zu vermeiden.
-
-### Alternative: Discover-Keywords (automatisiert)
-
-Kombiniert Schritt 1-3 teilweise automatisch:
-
+**b) Related Interests** → Feld `idea.related_interests`
 ```
-POST /api/discover-keywords
-Content-Type: application/json
-
-{
-  "keyword": "dein keyword",
-  "limit": 10,
-  "scrapeLimit": 5,
-  "language": "de"
-}
+stricken anfänger
+makramee anfänger
 ```
 
-**Response:**
-- `keywords[]` → `{name, count, source}` (source: `annotation` | `klp_pivot` | `related_interest`)
-- `scrapedIdeas[]` → `{id, name, searches}` ← hier ist das Suchvolumen enthalten
+**c) Top Annotations** → Feld `pins[].annotations` (aus allen Pins sammeln, Duplikate zählen)
+```
+häkeln (12x)
+diy (8x)
+handarbeit (6x)
+wolle (5x)
+```
 
-> `count` = Häufigkeit des Keywords in den gescrapten Seiten (nicht Suchvolumen).
-> `scrapedIdeas[].searches` = tatsächliches Pinterest-Suchvolumen.
+> **Wichtig:** Annotations sind Tags aus Pins. Sie haben kein eigenes Suchvolumen auf Pinterest. Nur KLP Pivots und Related Interests können als Keywords mit Suchvolumen nachgeschlagen werden.
 
-### Output-Format
+### Schritt 3 – Suchvolumen für jedes verwandte Keyword abrufen
+
+Für **jedes** Keyword aus KLP Pivots und Related Interests **denselben Endpoint** erneut aufrufen:
+
+```bash
+curl -X POST https://pinspector-next.vercel.app/api/find-or-scrape-live \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "häkeln lernen",
+    "language": "de"
+  }'
+```
+
+→ Aus der Response `idea.searches` ablesen = Suchvolumen dieses Keywords.
+
+Dann den nächsten Call:
+
+```bash
+curl -X POST https://pinspector-next.vercel.app/api/find-or-scrape-live \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "einfache häkelmuster",
+    "language": "de"
+  }'
+```
+
+→ Wieder `idea.searches` ablesen.
+
+**So weiter für jedes Keyword.** Zwischen den Calls **2-3 Sekunden warten** (Rate-Limit).
+
+### Schritt 4 – Ergebnis-Tabelle zusammenstellen
+
+Alle Ergebnisse in einer Tabelle zusammenfassen:
 
 | Keyword | Suchvolumen | Quelle |
 |---------|-------------|--------|
-| keyword a | 12.400 | klp_pivot |
-| keyword b | 8.200 | related_interest |
-| keyword c | 3.100 | annotation |
+| häkeln anfänger | 14.800 | Haupt-Keyword |
+| häkeln lernen | 22.100 | KLP Pivot |
+| einfache häkelmuster | 9.400 | KLP Pivot |
+| häkeln ideen | 18.600 | KLP Pivot |
+| stricken anfänger | 11.200 | Related Interest |
+| makramee anfänger | 7.300 | Related Interest |
+| häkeln | – | Annotation (12x) |
+| diy | – | Annotation (8x) |
+
+---
+
+### Alternative: Discover-Keywords (automatisiert, ein einziger Call)
+
+Dieser Endpoint kombiniert Schritt 1-3 teilweise automatisch – er findet mehrere Pinterest-Ideas-Seiten zum Keyword und scrapt sie.
+
+**Endpunkt:** `POST https://pinspector-next.vercel.app/api/discover-keywords`
+
+```bash
+curl -X POST https://pinspector-next.vercel.app/api/discover-keywords \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyword": "häkeln anfänger",
+    "limit": 10,
+    "scrapeLimit": 5,
+    "language": "de"
+  }'
+```
+
+**Parameter:**
+| Parameter | Typ | Pflicht | Beschreibung |
+|-----------|-----|---------|--------------|
+| `keyword` | String | Ja | Das Keyword |
+| `limit` | Number | Nein | Wie viele Pinterest-Ideas-URLs gesucht werden (Standard: 10) |
+| `scrapeLimit` | Number | Nein | Wie viele davon tatsächlich gescrapt werden (Standard: 5) |
+| `language` | String | Nein | Sprachcode (Standard: `de`) |
+
+**Beispiel-Response (gekürzt):**
+
+```json
+{
+  "success": true,
+  "keyword": "häkeln anfänger",
+  "urlsFound": 10,
+  "urlsScraped": 5,
+  "keywords": [
+    { "name": "häkeln lernen", "count": 4, "source": "klp_pivot" },
+    { "name": "stricken anfänger", "count": 3, "source": "related_interest" },
+    { "name": "diy", "count": 8, "source": "annotation" }
+  ],
+  "scrapedIdeas": [
+    { "id": "987654321", "name": "häkeln anfänger", "searches": 14800 },
+    { "id": "123456789", "name": "häkeln lernen", "searches": 22100 },
+    { "id": "111222333", "name": "einfache häkelmuster", "searches": 9400 }
+  ]
+}
+```
+
+**So liest du das Ergebnis:**
+- `scrapedIdeas[]` → Jeder Eintrag hat `name` + `searches` (= Suchvolumen)
+- `keywords[]` → Alle gefundenen Keywords mit Quelle. `count` = wie oft das Keyword auf den gescrapten Seiten vorkam (nicht Suchvolumen!)
 
 ---
 
 ## SOP 2: Top Pins für ein Keyword (mit Saves, Repins, Comments)
 
-**Ziel:** Die Top Pins für ein bestimmtes Keyword abrufen, inkl. Engagement-Metriken.
+**Ziel:** Die Top Pins für ein bestimmtes Keyword abrufen mit Engagement-Metriken (Saves, Repins, Comments).
 
-### Schritt 1 – Keyword scrapen und Pins erhalten
+**Endpunkt:** `POST https://pinspector-next.vercel.app/api/find-or-scrape-live`
 
+---
+
+### Schritt 1 – Keyword abfragen
+
+```bash
+curl -X POST https://pinspector-next.vercel.app/api/find-or-scrape-live \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "home office einrichten",
+    "language": "de"
+  }'
 ```
-POST /api/find-or-scrape-live
-Content-Type: application/json
 
+**Parameter:**
+| Parameter | Typ | Pflicht | Beschreibung |
+|-----------|-----|---------|--------------|
+| `name` | String | Ja | Das Keyword, für das die Top Pins abgerufen werden sollen |
+| `language` | String | Nein | Sprachcode (Standard: `de`) |
+
+### Schritt 2 – Pins aus der Response auslesen
+
+Die Response enthält ein `pins[]`-Array mit bis zu 20 Pins.
+
+**Beispiel-Response (gekürzt auf `pins[]`):**
+
+```json
 {
-  "name": "dein keyword",
-  "language": "de"
+  "success": true,
+  "idea": {
+    "name": "home office einrichten",
+    "searches": 27400
+  },
+  "pins": [
+    {
+      "id": "pin_001",
+      "title": "10 Tipps für das perfekte Home Office",
+      "description": "So richtest du dein Home Office produktiv ein...",
+      "save_count": 3400,
+      "repin_count": 2800,
+      "comment_count": 67,
+      "link": "https://example.com/home-office-tipps",
+      "image_url": "https://i.pinimg.com/originals/ab/cd/ef.jpg",
+      "domain": "example.com",
+      "pin_created_at": "2024-03-15T10:00:00Z",
+      "annotations": ["home office", "einrichtung", "produktivität"]
+    },
+    {
+      "id": "pin_002",
+      "title": "Kleines Home Office – große Wirkung",
+      "description": "Auch auf wenig Raum lässt sich ein tolles Büro...",
+      "save_count": 2100,
+      "repin_count": 1750,
+      "comment_count": 34,
+      "link": "https://example.com/kleines-buero",
+      "image_url": "https://i.pinimg.com/originals/gh/ij/kl.jpg",
+      "domain": "example.com",
+      "pin_created_at": "2024-01-22T14:30:00Z",
+      "annotations": ["home office", "kleine räume", "ikea"]
+    }
+  ]
 }
 ```
 
-**Response enthält `pins[]` (bis zu 20 Pins) mit:**
-- `title` → Pin-Titel
-- `description` → Beschreibung
-- `save_count` → Anzahl Saves
-- `repin_count` → Anzahl Repins
-- `comment_count` → Anzahl Kommentare
-- `link` → Ziel-URL
-- `image_url` → Bild-URL
-- `domain` → Quell-Domain
-- `pin_created_at` → Erstelldatum
+### Schritt 3 – Ergebnis-Tabelle erstellen
 
-### Schritt 2 – Ergebnis-Tabelle erstellen
+Relevante Felder pro Pin:
 
-Pins aus `pins[]` als Tabelle:
+| Feld | Beschreibung |
+|------|-------------|
+| `title` | Titel des Pins |
+| `save_count` | Wie oft der Pin gespeichert wurde |
+| `repin_count` | Wie oft der Pin repinnt wurde |
+| `comment_count` | Anzahl Kommentare |
+| `link` | Ziel-URL (wohin der Pin verlinkt) |
+| `domain` | Domain der Ziel-URL |
+| `pin_created_at` | Erstelldatum des Pins |
 
-| # | Titel | Saves | Repins | Comments | Domain | Link |
-|---|-------|-------|--------|----------|--------|------|
-| 1 | ... | 1.200 | 980 | 45 | example.com | ... |
-| 2 | ... | 890 | 750 | 32 | ... | ... |
+**Beispiel-Tabelle:**
 
-> Die Pins kommen in der Reihenfolge, wie Pinterest sie auf der Ideas-Seite anzeigt (Relevanz-Sortierung). Für eine eigene Sortierung nach Saves/Repins/Comments die Tabelle clientseitig sortieren.
+| # | Titel | Saves | Repins | Comments | Domain |
+|---|-------|-------|--------|----------|--------|
+| 1 | 10 Tipps für das perfekte Home Office | 3.400 | 2.800 | 67 | example.com |
+| 2 | Kleines Home Office – große Wirkung | 2.100 | 1.750 | 34 | example.com |
 
-### Alternative: Nur Pins live scrapen (wenn URL bekannt)
-
-```
-POST /api/pins-live
-Content-Type: application/json
-
-{
-  "url": "https://de.pinterest.com/ideas/dein-keyword/1234567890/",
-  "language": "de"
-}
-```
+> **Hinweis:** Die Pins kommen in Pinterest-Relevanz-Reihenfolge (nicht nach Saves sortiert). Zum Sortieren nach Saves/Repins/Comments die Liste selbst umsortieren.
 
 ---
 
 ## Offene Fragen
 
-1. **Shares:** Pinterest stellt keine Share-Zahlen über das Scraping bereit. Verfügbar sind nur `save_count`, `repin_count` und `comment_count`. Shares sind in der aktuellen API nicht abrufbar.
-2. **Suchvolumen für Annotations:** Annotations sind Keyword-Tags aus Pins (z.B. "vegan", "DIY"). Sie haben kein eigenes Pinterest-Suchvolumen, da sie keine eigenständigen Pinterest-Ideas-Seiten sind. Nur Keywords, die als Pinterest Interest/Idea existieren, haben ein Suchvolumen.
-3. **Rate-Limits:** Bei Massen-Abfragen (viele Keywords hintereinander) können Pinterest-seitige Blockierungen auftreten (403/429). Empfehlung: Max. 1 Request alle 2-3 Sekunden.
-4. **Sortierung Pins:** Die Pins kommen unsortiert nach Engagement – sie sind nach Pinterest-Relevanz geordnet. Eine Sortierung nach `save_count`, `repin_count` oder `comment_count` muss clientseitig erfolgen.
-5. **Sprache:** Alle Endpoints unterstützen den `language`-Parameter (`de`, `en`, `fr`, `es`, `it`, `pt`, `nl`). Standard ist Deutsch (`de`).
+1. **Suchvolumen für Annotations:** Annotations (z.B. "diy", "wolle") sind Pin-Tags. Sie haben kein Pinterest-Suchvolumen, da sie keine eigenständigen Pinterest-Ideas-Seiten sind. Nur KLP Pivots und Related Interests lassen sich mit Suchvolumen nachschlagen.
+2. **Rate-Limits:** Bei vielen Keyword-Abfragen hintereinander 2-3 Sekunden Pause zwischen Calls einhalten. Pinterest kann sonst mit 403/429 blockieren.
+3. **Sortierung Pins:** Pins sind nach Pinterest-Relevanz sortiert, nicht nach Engagement. Sortierung nach `save_count`/`repin_count`/`comment_count` muss manuell erfolgen.
+4. **Sprache:** Alle Endpoints unterstützen `de`, `en`, `fr`, `es`, `it`, `pt`, `nl`.
