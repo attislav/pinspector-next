@@ -105,7 +105,8 @@ export function detectLanguageFromUrl(url: string): SupportedLanguage | null {
     if (subdomain === 'br') return 'pt';
     if (isSupportedLanguage(subdomain)) return subdomain;
   }
-  if (/https?:\/\/www\.pinterest\.com/.test(url)) return 'en';
+  // www.pinterest.com is the global domain used by all languages — don't assume English.
+  // Return null so the caller falls back to the app default (German).
   return null;
 }
 
