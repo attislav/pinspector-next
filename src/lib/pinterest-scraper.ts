@@ -463,19 +463,17 @@ export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions)
 
     const html = await response.text();
 
-    // === Strategy 1: Extract annotations from v3GetPinQuery (Relay SSR) ===
-    // Pinterest delivers pin data via inline Relay SSR scripts that call
-    // window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__ with JSON like:
-    // {"data":{"v3GetPinQuery":{"data":{"pinJoin":{"annotationsWithLinksArray":[...]}}}}}
-    // There are typically 2 v3GetPinQuery blocks — one with annotations, one without.
+    // === Strategy 1: Extract pin data from v3GetPinQuery (Relay SSR) ===
+    // Pinterest delivers pin data via inline Relay SSR scripts. There are typically
+    // 2 v3GetPinQuery blocks: one with basic pin metadata, one with annotations.
+    // We collect ALL blocks and merge the data.
     let annotations: { name: string; url: string }[] = [];
-    let v3PinData: any = null;
+    const v3Blocks: any[] = [];
 
     const v3Regex = /\{"data":\{"v3GetPinQuery":/g;
     let v3Match: RegExpExecArray | null;
 
     while ((v3Match = v3Regex.exec(html)) !== null) {
-      // Extract the complete JSON object by counting braces
       const start = v3Match.index;
       let depth = 0;
       let end = start;
@@ -491,24 +489,26 @@ export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions)
       try {
         const block = JSON.parse(html.slice(start, end));
         const pinQuery = block?.data?.v3GetPinQuery;
-        if (pinQuery?.data?.pinJoin?.annotationsWithLinksArray) {
-          v3PinData = pinQuery.data;
-          annotations = pinQuery.data.pinJoin.annotationsWithLinksArray
-            .filter((a: any) => a?.name && a?.url)
-            .map((a: any) => ({
-              name: a.name,
-              url: a.url.startsWith('http') ? a.url : `https://${domain}${a.url}`,
-            }));
-          break;
-        }
-        // Store pin data even without annotations (first block often has basic pin info)
-        if (!v3PinData && pinQuery?.data) {
-          v3PinData = pinQuery.data;
+        if (pinQuery?.data) {
+          v3Blocks.push(pinQuery.data);
+          // Extract annotations if present
+          const awl = pinQuery.data?.pinJoin?.annotationsWithLinksArray;
+          if (Array.isArray(awl) && awl.length > 0 && annotations.length === 0) {
+            annotations = awl
+              .filter((a: any) => a?.name && a?.url)
+              .map((a: any) => ({
+                name: a.name,
+                url: a.url.startsWith('http') ? a.url : `https://${domain}${a.url}`,
+              }));
+          }
         }
       } catch {
         // Skip unparseable blocks
       }
     }
+
+    // Merge all v3 blocks into one object (later blocks override earlier ones)
+    const v3PinData = Object.assign({}, ...v3Blocks);
 
     // === Strategy 2: Extract pin data from Redux state ===
     let reduxMatch = html.match(
@@ -590,15 +590,27 @@ export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions)
       return { success: false, error: 'Keine Pin-Daten gefunden (weder v3GetPinQuery noch Redux-State)' };
     }
 
-    // Use Redux pin as primary data source for structured fields, v3 data as supplement
+    // Merge data sources: v3 Relay data (camelCase) + Redux data (snake_case)
+    // v3 data is preferred since Redux is often empty on pin pages
+    const v3 = v3PinData || {};
     pin = pin || {};
     const now = new Date().toISOString();
 
-    // Extract all image sizes
+    // Extract all image sizes from v3 (images_736x, images_474x etc.) and Redux (images.736x)
     const images: Record<string, { url: string; width: number; height: number }> = {};
+    // v3 format: flat keys like images_736x, images_474x
+    const imageSizes = ['orig', '736x', '600x315', '564x', '474x', '236x', '170x', '136x136', '60x60'];
+    for (const size of imageSizes) {
+      const v3Key = `images_${size}`;
+      const v3Img = v3[v3Key];
+      if (v3Img?.url) {
+        images[size] = { url: v3Img.url, width: v3Img.width || 0, height: v3Img.height || 0 };
+      }
+    }
+    // Redux format: nested images object
     if (pin?.images) {
       for (const [size, data] of Object.entries(pin.images) as [string, any][]) {
-        if (data?.url) {
+        if (data?.url && !images[size]) {
           images[size] = { url: data.url, width: data.width || 0, height: data.height || 0 };
         }
       }
@@ -607,81 +619,87 @@ export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions)
     const imageUrl = images['736x']?.url || images['564x']?.url || images['474x']?.url || images['orig']?.url || null;
     const thumbnailUrl = images['236x']?.url || images['170x']?.url || images['136x136']?.url || null;
 
-    // Extract article/rich pin link
-    const articleUrl = pin?.rich_summary?.url
-      || pin?.rich_metadata?.url
-      || pin?.rich_metadata?.article?.url
-      || pin?.link
-      || pin?.attribution?.url
-      || pin?.tracked_link
+    // Extract article/rich pin link (v3 uses camelCase)
+    const articleUrl = v3.link || v3.trackedLink || v3.utmLink
+      || pin?.rich_summary?.url || pin?.rich_metadata?.url
+      || pin?.link || pin?.tracked_link
       || null;
 
-    // Extract pin created date
-    let pinCreatedAt = pin?.created_at || pin?.created_time || pin?.date_created || null;
+    // Extract pin created date (v3: "Fri, 14 Mar 2025 16:26:01 +0000", Redux: ISO or timestamp)
+    let pinCreatedAt = v3.createdAt || pin?.created_at || pin?.created_time || null;
     if (pinCreatedAt && typeof pinCreatedAt === 'number') {
       pinCreatedAt = pinCreatedAt < 4102444800
         ? new Date(pinCreatedAt * 1000).toISOString()
         : new Date(pinCreatedAt).toISOString();
+    } else if (pinCreatedAt && typeof pinCreatedAt === 'string' && !pinCreatedAt.includes('T')) {
+      // Parse date strings like "Fri, 14 Mar 2025 16:26:01 +0000"
+      try { pinCreatedAt = new Date(pinCreatedAt).toISOString(); } catch { /* keep as-is */ }
     }
 
-    // Extract board info
+    // Extract board info (v3: nested object with url, entityId)
+    const v3Board = v3.board || {};
     const board = {
-      id: pin?.board?.id || null,
-      name: pin?.board?.name || pin?.board?.title || pin?.pin_join?.board?.name || null,
-      url: pin?.board?.url ? `https://${domain}${pin.board.url}` : null,
+      id: v3Board.entityId || pin?.board?.id || null,
+      name: v3Board.name || pin?.board?.name || pin?.board?.title || null,
+      url: v3Board.url ? `https://${domain}${v3Board.url}` : (pin?.board?.url ? `https://${domain}${pin.board.url}` : null),
       privacy: pin?.board?.privacy || null,
     };
 
-    // Extract pinner/creator info
+    // Extract pinner/creator info (v3: pinner or closeupAttribution or nativeCreator)
+    const v3Pinner = v3.pinner || {};
+    const v3Creator = v3.nativeCreator || {};
+    const v3Closeup = v3.closeupAttribution || {};
     const pinner = {
-      id: pin?.pinner?.id || pin?.native_creator?.id || null,
-      username: pin?.pinner?.username || pin?.native_creator?.username || null,
-      full_name: pin?.pinner?.full_name || pin?.native_creator?.full_name || null,
-      image_url: pin?.pinner?.image_medium_url || pin?.native_creator?.image_medium_url || null,
+      id: v3Pinner.entityId || v3Creator.entityId || pin?.pinner?.id || pin?.native_creator?.id || null,
+      username: v3Pinner.username || v3Creator.username || pin?.pinner?.username || pin?.native_creator?.username || null,
+      full_name: v3Closeup.fullName || v3Pinner.fullName || v3Creator.fullName || pin?.pinner?.full_name || pin?.native_creator?.full_name || null,
+      image_url: v3Pinner.imageMediumUrl || v3Creator.imageMediumUrl || pin?.pinner?.image_medium_url || null,
     };
 
-    // Extract rich metadata
+    // Extract rich metadata (v3: richMetadata with __typename)
     let richMetadata: PinDetail['rich_metadata'] = null;
-    if (pin?.rich_metadata) {
+    const v3Rich = v3.richMetadata || pin?.rich_metadata;
+    if (v3Rich) {
       richMetadata = {
-        type: pin.rich_metadata.type || pin.rich_metadata.pin_type || null,
-        title: pin.rich_metadata.title || null,
-        description: pin.rich_metadata.description || null,
-        url: pin.rich_metadata.url || null,
-        site_name: pin.rich_metadata.site_name || null,
-        favicon_url: pin.rich_metadata.favicon_link || pin.rich_metadata.favicon_url || null,
+        type: v3Rich.__typename || v3Rich.type || v3Rich.pin_type || null,
+        title: v3Rich.title || v3Rich.article?.name || null,
+        description: v3Rich.description || null,
+        url: v3.link || v3Rich.url || null,
+        site_name: v3Rich.site_name || v3Rich.siteName || null,
+        favicon_url: v3Rich.favicon_link || v3Rich.faviconLink || v3Rich.favicon_url || null,
       };
     }
 
-    // Comment count
-    const commentCount = pin?.comment_count
+    // Engagement metrics (v3: aggregatedPinData, repinCount)
+    const v3Agg = v3.aggregatedPinData || {};
+    const commentCount = v3Agg.commentCount
+      || pin?.comment_count
       || pin?.aggregated_pin_data?.comment_count
-      || pin?.aggregated_pin_data?.aggregated_stats?.comments
       || 0;
 
     const pinDetail: PinDetail = {
-      id: pin?.id || pinId,
-      title: pin?.title || pin?.grid_title || null,
-      description: pin?.description || pin?.closeup_description || null,
+      id: v3.entityId || pin?.id || pinId,
+      title: v3.gridTitle || v3.title || v3.closeupUnifiedTitle || pin?.title || pin?.grid_title || null,
+      description: v3.description || v3.closeupUnifiedDescription || pin?.description || null,
       image_url: imageUrl,
       image_thumbnail_url: thumbnailUrl,
       images,
-      link: `https://www.pinterest.com/pin/${pin?.id || pinId}/`,
+      link: `https://www.pinterest.com/pin/${v3.entityId || pin?.id || pinId}/`,
       article_url: articleUrl,
-      repin_count: pin?.repin_count || 0,
-      save_count: pin?.aggregated_pin_data?.aggregated_stats?.saves || 0,
+      repin_count: v3.repinCount || pin?.repin_count || 0,
+      save_count: v3Agg.saves || pin?.aggregated_pin_data?.aggregated_stats?.saves || 0,
       comment_count: commentCount,
       annotations,
       pin_created_at: pinCreatedAt,
-      domain: pin?.domain || null,
+      domain: v3.domain || pin?.domain || null,
       board,
       pinner,
-      is_video: !!(pin?.is_video || pin?.videos),
-      is_promoted: !!(pin?.is_promoted || pin?.is_ad),
-      tracking_params: pin?.tracking_params || null,
+      is_video: !!(v3.videos || pin?.is_video || pin?.videos),
+      is_promoted: !!(v3.isPromoted || pin?.is_promoted),
+      tracking_params: v3.trackingParams || pin?.tracking_params || null,
       rich_metadata: richMetadata,
       scraped_at: now,
-      raw_data_keys: Object.keys(pin),
+      raw_data_keys: [...new Set([...Object.keys(v3), ...Object.keys(pin)])],
     };
 
     return { success: true, pin: pinDetail };
