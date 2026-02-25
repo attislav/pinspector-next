@@ -494,12 +494,59 @@ export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions)
       return { success: false, error: 'Pinterest Redux-State nicht gefunden' };
     }
 
-    // Find the pin in the Redux state
-    const pins = reduxState?.pins || {};
-    const pin = pins[pinId] || Object.values(pins)[0] as any;
+    // Find the pin in the Redux state — Pinterest stores pin data in different locations
+    // depending on page type and version:
+    // 1. reduxState.pins[pinId] (classic)
+    // 2. reduxState.resources.PinResource[key].data (pin detail page)
+    // 3. reduxState.resources.CloseupPinResource[key].data (closeup view)
+    let pin: any = null;
+
+    // Try 1: Direct pins object
+    const pinsMap = reduxState?.pins || {};
+    pin = pinsMap[pinId] || (Object.keys(pinsMap).length > 0 ? Object.values(pinsMap)[0] : null);
+
+    // Try 2: PinResource
+    if (!pin && reduxState?.resources?.PinResource) {
+      const pinRes = reduxState.resources.PinResource;
+      const firstKey = Object.keys(pinRes)[0];
+      if (firstKey) {
+        pin = pinRes[firstKey]?.data;
+      }
+    }
+
+    // Try 3: CloseupPinResource
+    if (!pin && reduxState?.resources?.CloseupPinResource) {
+      const closeupRes = reduxState.resources.CloseupPinResource;
+      const firstKey = Object.keys(closeupRes)[0];
+      if (firstKey) {
+        pin = closeupRes[firstKey]?.data;
+      }
+    }
+
+    // Try 4: Look through all resources for anything with a pin id
+    if (!pin && reduxState?.resources) {
+      for (const [resName, resObj] of Object.entries(reduxState.resources) as [string, any][]) {
+        if (resName.toLowerCase().includes('pin')) {
+          const firstKey = Object.keys(resObj)[0];
+          if (firstKey && resObj[firstKey]?.data?.id) {
+            pin = resObj[firstKey].data;
+            break;
+          }
+        }
+      }
+    }
 
     if (!pin) {
-      return { success: false, error: `Pin ${pinId} nicht im Redux-State gefunden` };
+      const topLevelKeys = Object.keys(reduxState).join(', ');
+      const resourceKeys = reduxState?.resources ? Object.keys(reduxState.resources).join(', ') : 'keine';
+      const pinsCount = Object.keys(pinsMap).length;
+      return {
+        success: false,
+        error: `Pin ${pinId} nicht im Redux-State gefunden. `
+          + `Top-level keys: [${topLevelKeys}]. `
+          + `Resources: [${resourceKeys}]. `
+          + `pins count: ${pinsCount}`,
+      };
     }
 
     const now = new Date().toISOString();
