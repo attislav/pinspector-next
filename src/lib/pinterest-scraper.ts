@@ -463,34 +463,50 @@ export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions)
 
     const html = await response.text();
 
-    // === Strategy 1: Extract annotations from v3GetPinQuery ===
-    // Pinterest delivers annotations in <script type="application/json"> blocks
-    // at path: response.data.v3GetPinQuery.data.pinJoin.annotationsWithLinksArray
+    // === Strategy 1: Extract annotations from v3GetPinQuery (Relay SSR) ===
+    // Pinterest delivers pin data via inline Relay SSR scripts that call
+    // window.__PWS_RELAY_REGISTER_COMPLETED_REQUEST__ with JSON like:
+    // {"data":{"v3GetPinQuery":{"data":{"pinJoin":{"annotationsWithLinksArray":[...]}}}}}
+    // There are typically 2 v3GetPinQuery blocks — one with annotations, one without.
     let annotations: { name: string; url: string }[] = [];
     let v3PinData: any = null;
 
-    const scriptRegex = /<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/g;
-    let scriptMatch: RegExpExecArray | null;
+    const v3Regex = /\{"data":\{"v3GetPinQuery":/g;
+    let v3Match: RegExpExecArray | null;
 
-    while ((scriptMatch = scriptRegex.exec(html)) !== null) {
-      try {
-        const block = JSON.parse(scriptMatch[1]);
-        const pinQuery = block?.response?.data?.v3GetPinQuery?.data;
-        if (pinQuery) {
-          v3PinData = pinQuery;
-          const annotationsRaw = pinQuery?.pinJoin?.annotationsWithLinksArray;
-          if (Array.isArray(annotationsRaw)) {
-            annotations = annotationsRaw
-              .filter((a: any) => a?.name && a?.url)
-              .map((a: any) => ({
-                name: a.name,
-                url: a.url.startsWith('http') ? a.url : `https://${domain}${a.url}`,
-              }));
-          }
+    while ((v3Match = v3Regex.exec(html)) !== null) {
+      // Extract the complete JSON object by counting braces
+      const start = v3Match.index;
+      let depth = 0;
+      let end = start;
+      for (let i = start; i < Math.min(html.length, start + 200000); i++) {
+        if (html[i] === '{') depth++;
+        else if (html[i] === '}') depth--;
+        if (depth === 0) {
+          end = i + 1;
           break;
         }
+      }
+
+      try {
+        const block = JSON.parse(html.slice(start, end));
+        const pinQuery = block?.data?.v3GetPinQuery;
+        if (pinQuery?.data?.pinJoin?.annotationsWithLinksArray) {
+          v3PinData = pinQuery.data;
+          annotations = pinQuery.data.pinJoin.annotationsWithLinksArray
+            .filter((a: any) => a?.name && a?.url)
+            .map((a: any) => ({
+              name: a.name,
+              url: a.url.startsWith('http') ? a.url : `https://${domain}${a.url}`,
+            }));
+          break;
+        }
+        // Store pin data even without annotations (first block often has basic pin info)
+        if (!v3PinData && pinQuery?.data) {
+          v3PinData = pinQuery.data;
+        }
       } catch {
-        // Skip invalid JSON blocks
+        // Skip unparseable blocks
       }
     }
 
