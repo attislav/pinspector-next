@@ -4,7 +4,7 @@ import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   Search, Loader2, ExternalLink, Tag, User, Layout, Globe,
-  Calendar, Heart, MessageCircle, Repeat, Video, Link2,
+  Calendar, Heart, MessageCircle, Repeat, Video, Link2, X,
 } from 'lucide-react';
 
 interface PinAnnotation {
@@ -46,6 +46,7 @@ function PinLiveContent() {
   const searchParams = useSearchParams();
   const initialPinId = searchParams.get('pinId') || '';
   const initialUrl = searchParams.get('url') || '';
+  const isEmbed = searchParams.get('embed') === 'true';
 
   const [input, setInput] = useState(initialUrl || (initialPinId ? `https://www.pinterest.com/pin/${initialPinId}/` : ''));
   const [loading, setLoading] = useState(false);
@@ -89,6 +90,144 @@ function PinLiveContent() {
     loadPin(initialUrl || initialPinId);
   }
 
+  // Embed mode: compact overlay style
+  if (isEmbed) {
+    return (
+      <div className="h-screen overflow-y-auto bg-white text-sm">
+        {/* Header bar */}
+        <div className="sticky top-0 z-10 bg-red-600 text-white px-4 py-2 flex items-center justify-between">
+          <span className="font-bold text-sm">Pin Inspector</span>
+          <div className="flex items-center gap-2">
+            {pin && (
+              <a
+                href={`/pin-live?pinId=${pin.id}`}
+                target="_blank"
+                className="text-white/80 hover:text-white text-xs underline"
+              >
+                Vollansicht
+              </a>
+            )}
+            <button
+              onClick={() => window.parent.postMessage('pinspector-close', '*')}
+              className="p-1 hover:bg-red-700 rounded"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-3">
+          {/* Loading */}
+          {loading && (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-red-600" />
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+              {error}
+            </div>
+          )}
+
+          {/* Results */}
+          {pin && !loading && (
+            <div className="space-y-3">
+              {/* Title & Description */}
+              <div>
+                <h2 className="font-bold text-gray-900 text-base mb-1">{pin.title || 'Kein Titel'}</h2>
+                {pin.description && (
+                  <p className="text-xs text-gray-600 line-clamp-3">{pin.description}</p>
+                )}
+              </div>
+
+              {/* Stats */}
+              <div className="flex flex-wrap gap-2">
+                <Stat icon={<Heart className="w-3 h-3" />} label="Saves" value={pin.save_count} />
+                <Stat icon={<Repeat className="w-3 h-3" />} label="Repins" value={pin.repin_count} />
+                <Stat icon={<MessageCircle className="w-3 h-3" />} label="Comments" value={pin.comment_count} />
+                {pin.is_video && <span className="flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full"><Video className="w-3 h-3" /> Video</span>}
+              </div>
+
+              {/* Meta */}
+              <div className="grid grid-cols-1 gap-1 text-xs">
+                {pin.board?.name && (
+                  <MetaRow icon={<Layout className="w-3 h-3" />} label="Board">
+                    {pin.board.url
+                      ? <a href={pin.board.url} target="_blank" className="text-blue-600 hover:underline">{pin.board.name}</a>
+                      : pin.board.name}
+                  </MetaRow>
+                )}
+                {pin.pinner?.full_name && (
+                  <MetaRow icon={<User className="w-3 h-3" />} label="Pinner">
+                    {pin.pinner.username
+                      ? <a href={`https://pinterest.com/${pin.pinner.username}/`} target="_blank" className="text-blue-600 hover:underline">{pin.pinner.full_name}</a>
+                      : pin.pinner.full_name}
+                  </MetaRow>
+                )}
+                {pin.domain && (
+                  <MetaRow icon={<Globe className="w-3 h-3" />} label="Domain">{pin.domain}</MetaRow>
+                )}
+                {pin.pin_created_at && (
+                  <MetaRow icon={<Calendar className="w-3 h-3" />} label="Erstellt">
+                    {new Date(pin.pin_created_at).toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </MetaRow>
+                )}
+              </div>
+
+              {/* Annotations */}
+              {pin.annotations.length > 0 && (
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-2 flex items-center gap-1.5 text-xs">
+                    <Tag className="w-3.5 h-3.5 text-red-600" />
+                    Annotations ({pin.annotations.length})
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {pin.annotations.map((ann, i) => (
+                      <a
+                        key={i}
+                        href={ann.url}
+                        target="_blank"
+                        className="inline-flex items-center px-2 py-1 bg-red-50 text-red-700 rounded-full text-xs hover:bg-red-100 border border-red-200"
+                      >
+                        {ann.name}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Rich Metadata */}
+              {pin.rich_metadata?.title && (
+                <div className="text-xs space-y-0.5">
+                  <h3 className="font-semibold text-gray-900">Rich Pin Metadata</h3>
+                  <p><span className="text-gray-500">Titel:</span> {pin.rich_metadata.title}</p>
+                  {pin.rich_metadata.description && (
+                    <p><span className="text-gray-500">Desc:</span> {pin.rich_metadata.description}</p>
+                  )}
+                  {pin.rich_metadata.site_name && (
+                    <p><span className="text-gray-500">Site:</span> {pin.rich_metadata.site_name}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Links */}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {pin.article_url && (
+                  <a href={pin.article_url} target="_blank" className="inline-flex items-center gap-1 text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full hover:bg-blue-200">
+                    <Link2 className="w-3 h-3" /> Originalartikel
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Normal full-page mode
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Pin Live Inspector</h1>

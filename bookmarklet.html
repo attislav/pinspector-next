@@ -2,10 +2,11 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>Pin Inspector - Bookmarklet</title>
+  <title>Pin Inspector - Bookmarklets</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; color: #333; }
+    body { font-family: system-ui, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #333; }
     h1 { color: #e60023; }
+    h2 { margin-top: 32px; }
     .bookmarklet-link {
       display: inline-block;
       background: #e60023;
@@ -15,40 +16,58 @@
       text-decoration: none;
       font-weight: bold;
       font-size: 16px;
-      margin: 20px 0;
+      margin: 12px 0;
       cursor: grab;
     }
     .bookmarklet-link:hover { background: #c2001d; }
+    .bookmarklet-link.secondary {
+      background: #333;
+    }
+    .bookmarklet-link.secondary:hover { background: #555; }
     .steps { background: #f9f9f9; padding: 20px; border-radius: 12px; margin: 20px 0; }
     .steps li { margin: 8px 0; }
     code { background: #eee; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+    .badge { display: inline-block; background: #e60023; color: white; font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; }
+    hr { border: none; border-top: 1px solid #eee; margin: 30px 0; }
   </style>
 </head>
 <body>
-  <h1>Pin Inspector Bookmarklet</h1>
-  <p>Ziehe den folgenden Button in deine <b>Lesezeichenleiste</b>:</p>
+  <h1>Pin Inspector Bookmarklets</h1>
 
-  <a class="bookmarklet-link" href="javascript:void(function(){var m=location.href.match(/\/pin\/(\d+)/);if(!m)return alert('Keine Pin-ID in der URL gefunden');window.open('https://pinspector-next.vercel.app/pin-live?pinId='+m[1])})()">
-    Pin Inspector
+  <h2>Overlay Bookmarklet <span class="badge">Empfohlen</span></h2>
+  <p>Zeigt Pin-Daten direkt als <b>Overlay auf der Pinterest-Seite</b> an:</p>
+
+  <a class="bookmarklet-link" href="javascript:void(function(){var m=location.href.match(/\/pin\/(\d+)/);if(!m)return alert('Keine Pin-ID in der URL gefunden');if(document.getElementById('pinspector-overlay')){document.getElementById('pinspector-overlay').remove();return}var d=document.createElement('div');d.id='pinspector-overlay';d.style.cssText='position:fixed;top:0;right:0;width:380px;height:100vh;z-index:999999;box-shadow:-4px 0 20px rgba(0,0,0,0.3);border-left:2px solid #e60023;';var f=document.createElement('iframe');f.src='https://pinspector-next.vercel.app/pin-live?pinId='+m[1]+'&embed=true';f.style.cssText='width:100%;height:100%;border:none;';d.appendChild(f);document.body.appendChild(d);window.addEventListener('message',function handler(e){if(e.data==='pinspector-close'){d.remove();window.removeEventListener('message',handler)}})})()">
+    Pin Inspector Overlay
   </a>
 
   <div class="steps">
-    <h3>Anleitung:</h3>
+    <h3>So funktioniert's:</h3>
     <ol>
-      <li>Zeige deine <b>Lesezeichenleiste</b> an (<code>Strg+Shift+B</code>)</li>
-      <li><b>Ziehe</b> den roten Button oben in die Lesezeichenleiste</li>
+      <li>Ziehe den roten Button in deine <b>Lesezeichenleiste</b> (<code>Strg+Shift+B</code>)</li>
       <li>Gehe auf eine beliebige <b>Pinterest Pin-Seite</b></li>
-      <li>Klicke auf <b>"Pin Inspector"</b> in der Lesezeichenleiste</li>
-      <li>Ein neuer Tab mit allen Pin-Daten und Annotations wird geoeffnet</li>
+      <li>Klicke auf <b>"Pin Inspector Overlay"</b></li>
+      <li>Ein Panel erscheint rechts mit allen Pin-Daten</li>
+      <li>Nochmal klicken zum <b>Schliessen</b>, oder X-Button im Panel</li>
     </ol>
   </div>
 
+  <hr>
+
+  <h2>Neuer-Tab Bookmarklet</h2>
+  <p>Oeffnet Pin-Daten in einem <b>neuen Tab</b> (falls Overlay nicht funktioniert):</p>
+
+  <a class="bookmarklet-link secondary" href="javascript:void(function(){var m=location.href.match(/\/pin\/(\d+)/);if(!m)return alert('Keine Pin-ID in der URL gefunden');window.open('https://pinspector-next.vercel.app/pin-live?pinId='+m[1])})()">
+    Pin Inspector (neuer Tab)
+  </a>
+
+  <hr>
+
   <h3>Was du siehst:</h3>
   <ul>
-    <li>Pin-Bild, Titel, Description</li>
-    <li>Annotations als klickbare Chips (verlinkt zur Ideas-Seite)</li>
+    <li>Pin-Titel, Description, Stats (Saves, Repins, Comments)</li>
+    <li>Annotations als klickbare Chips</li>
     <li>Board, Pinner, Domain, Erstelldatum</li>
-    <li>Saves, Repins, Comments</li>
     <li>Link zum Originalartikel</li>
     <li>Rich Pin Metadata</li>
   </ul>
