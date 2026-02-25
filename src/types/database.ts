@@ -121,7 +121,6 @@ export interface PinDetail {
     favicon_url: string | null;
   } | null;
   scraped_at: string;
-  raw_data_keys: string[];
 }
 
 export interface PinDetailResult {

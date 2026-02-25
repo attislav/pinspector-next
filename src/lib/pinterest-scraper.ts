@@ -699,7 +699,6 @@ export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions)
       tracking_params: v3.trackingParams || pin?.tracking_params || null,
       rich_metadata: richMetadata,
       scraped_at: now,
-      raw_data_keys: [...new Set([...Object.keys(v3), ...Object.keys(pin)])],
     };
 
     return { success: true, pin: pinDetail };
