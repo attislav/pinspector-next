@@ -22,7 +22,7 @@ Die Such- und Scraping-Endpoints unterstuetzen einen optionalen `language`-Param
 | `pt` | Portugiesisch | br.pinterest.com | Brasilien (2076) |
 | `nl` | Niederlaendisch | nl.pinterest.com | Niederlande (2528) |
 
-**Betroffene Endpoints:** `/api/discover-keywords`, `/api/find-interests`, `/api/find-or-scrape`, `/api/scrape`, `/api/scrape-live`, `/api/find-or-scrape-live`, `/api/pins-live`
+**Betroffene Endpoints:** `/api/discover-keywords`, `/api/find-interests`, `/api/find-or-scrape`, `/api/scrape`, `/api/scrape-live`, `/api/find-or-scrape-live`, `/api/pins-live`, `/api/pin-live`
 
 Wird kein `language` angegeben, wird automatisch `"de"` verwendet (Rueckwaertskompatibel).
 
@@ -673,7 +673,93 @@ Scrapt Pins einer Pinterest-Ideas-Seite live. **Kein DB-Zugriff.**
 
 ---
 
-### 20. POST /api/find-interests-live
+### 20. POST /api/pin-live
+
+Scrapt einen einzelnen Pinterest-Pin live und gibt alle verfuegbaren Daten zurueck: Annotations, Board-Info, Pinner/Creator, Engagement-Metriken, Rich Metadata, etc. **Kein DB-Zugriff.**
+
+**Request (per Pin-ID):**
+```json
+{
+  "pinId": "123456789",
+  "language": "de"
+}
+```
+
+**Request (per URL):**
+```json
+{
+  "url": "https://www.pinterest.com/pin/123456789/",
+  "language": "de"
+}
+```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| pinId | string | nein* | - | Pinterest Pin-ID (*entweder pinId oder url) |
+| url | string | nein* | - | Pinterest-Pin-URL (*entweder pinId oder url) |
+| language | string | nein | "de" | Sprache/Markt |
+
+**Response:**
+```json
+{
+  "success": true,
+  "pin": {
+    "id": "123456789",
+    "title": "15 geniale Meal Prep Ideen",
+    "description": "Die besten Meal Prep Rezepte fuer die ganze Woche...",
+    "image_url": "https://i.pinimg.com/736x/...",
+    "image_thumbnail_url": "https://i.pinimg.com/236x/...",
+    "images": {
+      "736x": { "url": "...", "width": 736, "height": 1104 },
+      "236x": { "url": "...", "width": 236, "height": 354 },
+      "orig": { "url": "...", "width": 1200, "height": 1800 }
+    },
+    "link": "https://www.pinterest.com/pin/123456789/",
+    "article_url": "https://example.com/meal-prep-guide",
+    "repin_count": 3500,
+    "save_count": 12000,
+    "comment_count": 45,
+    "annotations": [
+      { "name": "meal prep", "url": "https://www.pinterest.com/ideas/meal-prep/123/" },
+      { "name": "healthy recipes", "url": "https://www.pinterest.com/ideas/healthy-recipes/456/" }
+    ],
+    "pin_created_at": "2024-06-15T10:30:00.000Z",
+    "domain": "example.com",
+    "board": {
+      "id": "board123",
+      "name": "Meal Prep Ideas",
+      "url": "https://www.pinterest.com/user/meal-prep-ideas/",
+      "privacy": "public"
+    },
+    "pinner": {
+      "id": "user123",
+      "username": "healthyfoodie",
+      "full_name": "Healthy Foodie",
+      "image_url": "https://i.pinimg.com/..."
+    },
+    "is_video": false,
+    "is_promoted": false,
+    "tracking_params": "...",
+    "rich_metadata": {
+      "type": "article",
+      "title": "Meal Prep Guide",
+      "description": "Complete guide to meal prep...",
+      "url": "https://example.com/meal-prep-guide",
+      "site_name": "Example.com",
+      "favicon_url": "https://example.com/favicon.ico"
+    },
+    "scraped_at": "2025-01-20T14:00:00Z",
+    "raw_data_keys": ["id", "title", "description", "images", "board", "pinner", "pin_join", "..."]
+  },
+  "language": "de"
+}
+```
+
+**Hinweis:** `raw_data_keys` listet alle im Pinterest Redux-State verfuegbaren Keys fuer diesen Pin auf -- nuetzlich um zu sehen, welche weiteren Felder Pinterest liefert.
+
+---
+
+### 21. POST /api/find-interests-live
 
 Sucht via Google nach Pinterest-Ideas-URLs. **Kein DB-Zugriff** -- kein Duplikat-Check.
 

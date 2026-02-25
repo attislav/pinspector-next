@@ -81,6 +81,55 @@ export interface PaginatedResponse<T> {
   totalPages: number;
 }
 
+// Extended pin detail (for single-pin live scraping with all available Pinterest data)
+export interface PinDetail {
+  id: string;
+  title: string | null;
+  description: string | null;
+  image_url: string | null;
+  image_thumbnail_url: string | null;
+  images: Record<string, { url: string; width: number; height: number }>;
+  link: string;
+  article_url: string | null;
+  repin_count: number;
+  save_count: number;
+  comment_count: number;
+  annotations: { name: string; url: string }[];
+  pin_created_at: string | null;
+  domain: string | null;
+  board: {
+    id: string | null;
+    name: string | null;
+    url: string | null;
+    privacy: string | null;
+  };
+  pinner: {
+    id: string | null;
+    username: string | null;
+    full_name: string | null;
+    image_url: string | null;
+  };
+  is_video: boolean;
+  is_promoted: boolean;
+  tracking_params: string | null;
+  rich_metadata: {
+    type: string | null;
+    title: string | null;
+    description: string | null;
+    url: string | null;
+    site_name: string | null;
+    favicon_url: string | null;
+  } | null;
+  scraped_at: string;
+  raw_data_keys: string[];
+}
+
+export interface PinDetailResult {
+  success: boolean;
+  pin?: PinDetail;
+  error?: string;
+}
+
 export interface ScrapeResult {
   success: boolean;
   idea?: Idea;
