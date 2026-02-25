@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   Search, Loader2, ExternalLink, Tag, User, Layout, Globe,
@@ -35,6 +35,14 @@ interface PinData {
 }
 
 export default function PinLivePage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-red-600" /></div>}>
+      <PinLiveContent />
+    </Suspense>
+  );
+}
+
+function PinLiveContent() {
   const searchParams = useSearchParams();
   const initialPinId = searchParams.get('pinId') || '';
   const initialUrl = searchParams.get('url') || '';
