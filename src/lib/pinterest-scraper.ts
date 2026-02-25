@@ -1,4 +1,4 @@
-import { Idea, RelatedInterest, ScrapeResult, Pin, KlpPivot } from '@/types/database';
+import { Idea, RelatedInterest, ScrapeResult, Pin, KlpPivot, PinDetail, PinDetailResult } from '@/types/database';
 
 // User agents for rotation (keep these up-to-date with current browser versions)
 const USER_AGENTS = [
@@ -386,6 +386,239 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unbekannter Fehler beim Scrapen'
+    };
+  }
+}
+
+// Extract pin ID from a Pinterest pin URL
+export function extractPinIdFromUrl(url: string): string | null {
+  const match = url.match(/\/pin\/(\d+)/);
+  return match ? match[1] : null;
+}
+
+// Validate Pinterest pin URL
+export function isValidPinterestPinUrl(url: string): boolean {
+  return /^https?:\/\/([a-z]{2}\.)?(www\.)?pinterest\.[a-z.]+\/pin\/\d+/.test(url);
+}
+
+// Parse a Pinterest pin page and extract all available data
+export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions): Promise<PinDetailResult> {
+  try {
+    const domain = options?.pinterestDomain || 'www.pinterest.com';
+    const url = `https://${domain}/pin/${pinId}/`;
+
+    // Fetch the pin page with 15s timeout
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          'User-Agent': getRandomUserAgent(),
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': options?.acceptLanguage ?? 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Upgrade-Insecure-Requests': '1',
+          'DNT': '1',
+        },
+        cache: 'no-store',
+        redirect: 'follow',
+        signal: controller.signal,
+      });
+    } catch (fetchError) {
+      clearTimeout(timeout);
+      if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+        return { success: false, error: 'Timeout beim Laden der Pinterest-Pin-Seite (15s)' };
+      }
+      throw fetchError;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      if (response.status === 403) {
+        return { success: false, error: 'Pinterest hat die Anfrage blockiert (403 Forbidden)' };
+      }
+      if (response.status === 404) {
+        return { success: false, error: `Pin ${pinId} nicht gefunden (404)` };
+      }
+      if (response.status === 429) {
+        return { success: false, error: 'Pinterest Rate-Limit erreicht (429)' };
+      }
+      return { success: false, error: `HTTP Error: ${response.status}` };
+    }
+
+    const finalUrl = response.url;
+    if (finalUrl && (finalUrl.includes('/login') || finalUrl.includes('/challenge'))) {
+      return { success: false, error: 'Pinterest hat auf Login/Challenge umgeleitet' };
+    }
+
+    const html = await response.text();
+
+    // Extract Redux state from script tags
+    let scriptMatch = html.match(
+      /<script id="__PWS_INITIAL_PROPS__"[^>]*>(.*?)<\/script>/s
+    );
+
+    if (!scriptMatch) {
+      scriptMatch = html.match(
+        /<script id="__PWS_DATA__"[^>]*>(.*?)<\/script>/s
+      );
+    }
+
+    if (!scriptMatch) {
+      const isChallenge = html.includes('challenge') || html.includes('login');
+      if (isChallenge) {
+        return { success: false, error: 'Pinterest verlangt Challenge/Login-Verifizierung' };
+      }
+      return { success: false, error: 'Keine Pinterest-Daten im HTML gefunden' };
+    }
+
+    let jsonData: any;
+    try {
+      jsonData = JSON.parse(scriptMatch[1]);
+    } catch {
+      return { success: false, error: 'Fehler beim Parsen der Pinterest-JSON-Daten' };
+    }
+
+    const reduxState = jsonData?.initialReduxState
+      || jsonData?.props?.initialReduxState
+      || jsonData?.props?.context?.initialReduxState;
+
+    if (!reduxState) {
+      return { success: false, error: 'Pinterest Redux-State nicht gefunden' };
+    }
+
+    // Find the pin in the Redux state
+    const pins = reduxState?.pins || {};
+    const pin = pins[pinId] || Object.values(pins)[0] as any;
+
+    if (!pin) {
+      return { success: false, error: `Pin ${pinId} nicht im Redux-State gefunden` };
+    }
+
+    const now = new Date().toISOString();
+
+    // Extract annotations with URLs
+    const annotations: { name: string; url: string }[] = [];
+    const annotationsRaw = pin?.pin_join?.annotations_with_links;
+    if (annotationsRaw) {
+      const annotationsArray = Array.isArray(annotationsRaw)
+        ? annotationsRaw.flat()
+        : Object.values(annotationsRaw);
+      for (const item of annotationsArray as any[]) {
+        if (item?.name) {
+          annotations.push({
+            name: item.name,
+            url: item.url
+              ? (item.url.startsWith('http') ? item.url : `https://${domain}${item.url}`)
+              : '',
+          });
+        }
+      }
+    }
+
+    // Extract all image sizes
+    const images: Record<string, { url: string; width: number; height: number }> = {};
+    if (pin?.images) {
+      for (const [size, data] of Object.entries(pin.images) as [string, any][]) {
+        if (data?.url) {
+          images[size] = { url: data.url, width: data.width || 0, height: data.height || 0 };
+        }
+      }
+    }
+
+    const imageUrl = images['736x']?.url || images['564x']?.url || images['474x']?.url || images['orig']?.url || null;
+    const thumbnailUrl = images['236x']?.url || images['170x']?.url || images['136x136']?.url || null;
+
+    // Extract article/rich pin link
+    const articleUrl = pin?.rich_summary?.url
+      || pin?.rich_metadata?.url
+      || pin?.rich_metadata?.article?.url
+      || pin?.link
+      || pin?.attribution?.url
+      || pin?.tracked_link
+      || null;
+
+    // Extract pin created date
+    let pinCreatedAt = pin?.created_at || pin?.created_time || pin?.date_created || null;
+    if (pinCreatedAt && typeof pinCreatedAt === 'number') {
+      pinCreatedAt = pinCreatedAt < 4102444800
+        ? new Date(pinCreatedAt * 1000).toISOString()
+        : new Date(pinCreatedAt).toISOString();
+    }
+
+    // Extract board info
+    const board = {
+      id: pin?.board?.id || null,
+      name: pin?.board?.name || pin?.board?.title || pin?.pin_join?.board?.name || null,
+      url: pin?.board?.url ? `https://${domain}${pin.board.url}` : null,
+      privacy: pin?.board?.privacy || null,
+    };
+
+    // Extract pinner/creator info
+    const pinner = {
+      id: pin?.pinner?.id || pin?.native_creator?.id || null,
+      username: pin?.pinner?.username || pin?.native_creator?.username || null,
+      full_name: pin?.pinner?.full_name || pin?.native_creator?.full_name || null,
+      image_url: pin?.pinner?.image_medium_url || pin?.native_creator?.image_medium_url || null,
+    };
+
+    // Extract rich metadata
+    let richMetadata: PinDetail['rich_metadata'] = null;
+    if (pin?.rich_metadata) {
+      richMetadata = {
+        type: pin.rich_metadata.type || pin.rich_metadata.pin_type || null,
+        title: pin.rich_metadata.title || null,
+        description: pin.rich_metadata.description || null,
+        url: pin.rich_metadata.url || null,
+        site_name: pin.rich_metadata.site_name || null,
+        favicon_url: pin.rich_metadata.favicon_link || pin.rich_metadata.favicon_url || null,
+      };
+    }
+
+    // Comment count
+    const commentCount = pin?.comment_count
+      || pin?.aggregated_pin_data?.comment_count
+      || pin?.aggregated_pin_data?.aggregated_stats?.comments
+      || 0;
+
+    const pinDetail: PinDetail = {
+      id: pin?.id || pinId,
+      title: pin?.title || pin?.grid_title || null,
+      description: pin?.description || pin?.closeup_description || null,
+      image_url: imageUrl,
+      image_thumbnail_url: thumbnailUrl,
+      images,
+      link: `https://www.pinterest.com/pin/${pin?.id || pinId}/`,
+      article_url: articleUrl,
+      repin_count: pin?.repin_count || 0,
+      save_count: pin?.aggregated_pin_data?.aggregated_stats?.saves || 0,
+      comment_count: commentCount,
+      annotations,
+      pin_created_at: pinCreatedAt,
+      domain: pin?.domain || null,
+      board,
+      pinner,
+      is_video: !!(pin?.is_video || pin?.videos),
+      is_promoted: !!(pin?.is_promoted || pin?.is_ad),
+      tracking_params: pin?.tracking_params || null,
+      rich_metadata: richMetadata,
+      scraped_at: now,
+      raw_data_keys: Object.keys(pin),
+    };
+
+    return { success: true, pin: pinDetail };
+  } catch (error) {
+    console.error('Pin scrape error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unbekannter Fehler beim Pin-Scraping',
     };
   }
 }
