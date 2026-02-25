@@ -8,8 +8,7 @@ export const maxDuration = 30;
  * POST /api/pin-live
  *
  * Scrapes a single Pinterest pin page live and returns all available data
- * including annotations, board info, pinner info, engagement metrics, etc.
- * No database reads or writes.
+ * including annotations (via v3GetPinQuery), board info, pinner info, etc.
  *
  * Body: { pinId?: string, url?: string, language?: 'de'|'en'|'fr'|'es'|'it'|'pt'|'nl' }
  */
@@ -56,7 +55,7 @@ export async function POST(request: NextRequest) {
     if (!result.success || !result.pin) {
       return NextResponse.json(
         { success: false, error: result.error || 'Pin-Scraping fehlgeschlagen' },
-        { status: 400 }
+        { status: 422 }
       );
     }
 

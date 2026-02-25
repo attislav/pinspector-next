@@ -401,7 +401,10 @@ export function isValidPinterestPinUrl(url: string): boolean {
   return /^https?:\/\/([a-z]{2}\.)?(www\.)?pinterest\.[a-z.]+\/pin\/\d+/.test(url);
 }
 
-// Parse a Pinterest pin page and extract all available data
+// Parse a Pinterest pin page and extract all available data including annotations
+// Uses multiple extraction strategies:
+// 1. v3GetPinQuery from <script type="application/json"> blocks (best for annotations)
+// 2. Redux state from __PWS_INITIAL_PROPS__ / __PWS_DATA__ (fallback for pin data)
 export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions): Promise<PinDetailResult> {
   try {
     const domain = options?.pinterestDomain || 'www.pinterest.com';
@@ -460,115 +463,120 @@ export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions)
 
     const html = await response.text();
 
-    // Extract Redux state from script tags
-    let scriptMatch = html.match(
+    // === Strategy 1: Extract annotations from v3GetPinQuery ===
+    // Pinterest delivers annotations in <script type="application/json"> blocks
+    // at path: response.data.v3GetPinQuery.data.pinJoin.annotationsWithLinksArray
+    let annotations: { name: string; url: string }[] = [];
+    let v3PinData: any = null;
+
+    const scriptRegex = /<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/g;
+    let scriptMatch: RegExpExecArray | null;
+
+    while ((scriptMatch = scriptRegex.exec(html)) !== null) {
+      try {
+        const block = JSON.parse(scriptMatch[1]);
+        const pinQuery = block?.response?.data?.v3GetPinQuery?.data;
+        if (pinQuery) {
+          v3PinData = pinQuery;
+          const annotationsRaw = pinQuery?.pinJoin?.annotationsWithLinksArray;
+          if (Array.isArray(annotationsRaw)) {
+            annotations = annotationsRaw
+              .filter((a: any) => a?.name && a?.url)
+              .map((a: any) => ({
+                name: a.name,
+                url: a.url.startsWith('http') ? a.url : `https://${domain}${a.url}`,
+              }));
+          }
+          break;
+        }
+      } catch {
+        // Skip invalid JSON blocks
+      }
+    }
+
+    // === Strategy 2: Extract pin data from Redux state ===
+    let reduxMatch = html.match(
       /<script id="__PWS_INITIAL_PROPS__"[^>]*>(.*?)<\/script>/s
     );
-
-    if (!scriptMatch) {
-      scriptMatch = html.match(
+    if (!reduxMatch) {
+      reduxMatch = html.match(
         /<script id="__PWS_DATA__"[^>]*>(.*?)<\/script>/s
       );
     }
 
-    if (!scriptMatch) {
+    let pin: any = null;
+
+    if (reduxMatch) {
+      try {
+        const jsonData = JSON.parse(reduxMatch[1]);
+        const reduxState = jsonData?.initialReduxState
+          || jsonData?.props?.initialReduxState
+          || jsonData?.props?.context?.initialReduxState;
+
+        if (reduxState) {
+          // Try multiple locations for pin data
+          const pinsMap = reduxState?.pins || {};
+          pin = pinsMap[pinId] || (Object.keys(pinsMap).length > 0 ? Object.values(pinsMap)[0] : null);
+
+          if (!pin && reduxState?.resources?.PinResource) {
+            const pinRes = reduxState.resources.PinResource;
+            const firstKey = Object.keys(pinRes)[0];
+            if (firstKey) pin = pinRes[firstKey]?.data;
+          }
+
+          if (!pin && reduxState?.resources?.CloseupPinResource) {
+            const closeupRes = reduxState.resources.CloseupPinResource;
+            const firstKey = Object.keys(closeupRes)[0];
+            if (firstKey) pin = closeupRes[firstKey]?.data;
+          }
+
+          if (!pin && reduxState?.resources) {
+            for (const [resName, resObj] of Object.entries(reduxState.resources) as [string, any][]) {
+              if (resName.toLowerCase().includes('pin')) {
+                const firstKey = Object.keys(resObj)[0];
+                if (firstKey && resObj[firstKey]?.data?.id) {
+                  pin = resObj[firstKey].data;
+                  break;
+                }
+              }
+            }
+          }
+
+          // If no annotations from v3GetPinQuery, try Redux state
+          if (annotations.length === 0 && pin?.pin_join?.annotations_with_links) {
+            const annotationsRaw = pin.pin_join.annotations_with_links;
+            const annotationsArray = Array.isArray(annotationsRaw)
+              ? annotationsRaw.flat()
+              : Object.values(annotationsRaw);
+            for (const item of annotationsArray as any[]) {
+              if (item?.name) {
+                annotations.push({
+                  name: item.name,
+                  url: item.url
+                    ? (item.url.startsWith('http') ? item.url : `https://${domain}${item.url}`)
+                    : '',
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // Redux parse failed, continue with v3 data if available
+      }
+    }
+
+    // If we have neither v3 data nor Redux pin data, fail
+    if (!pin && !v3PinData) {
       const isChallenge = html.includes('challenge') || html.includes('login');
       if (isChallenge) {
         return { success: false, error: 'Pinterest verlangt Challenge/Login-Verifizierung' };
       }
-      return { success: false, error: 'Keine Pinterest-Daten im HTML gefunden' };
+      return { success: false, error: 'Keine Pin-Daten gefunden (weder v3GetPinQuery noch Redux-State)' };
     }
 
-    let jsonData: any;
-    try {
-      jsonData = JSON.parse(scriptMatch[1]);
-    } catch {
-      return { success: false, error: 'Fehler beim Parsen der Pinterest-JSON-Daten' };
-    }
-
-    const reduxState = jsonData?.initialReduxState
-      || jsonData?.props?.initialReduxState
-      || jsonData?.props?.context?.initialReduxState;
-
-    if (!reduxState) {
-      return { success: false, error: 'Pinterest Redux-State nicht gefunden' };
-    }
-
-    // Find the pin in the Redux state — Pinterest stores pin data in different locations
-    // depending on page type and version:
-    // 1. reduxState.pins[pinId] (classic)
-    // 2. reduxState.resources.PinResource[key].data (pin detail page)
-    // 3. reduxState.resources.CloseupPinResource[key].data (closeup view)
-    let pin: any = null;
-
-    // Try 1: Direct pins object
-    const pinsMap = reduxState?.pins || {};
-    pin = pinsMap[pinId] || (Object.keys(pinsMap).length > 0 ? Object.values(pinsMap)[0] : null);
-
-    // Try 2: PinResource
-    if (!pin && reduxState?.resources?.PinResource) {
-      const pinRes = reduxState.resources.PinResource;
-      const firstKey = Object.keys(pinRes)[0];
-      if (firstKey) {
-        pin = pinRes[firstKey]?.data;
-      }
-    }
-
-    // Try 3: CloseupPinResource
-    if (!pin && reduxState?.resources?.CloseupPinResource) {
-      const closeupRes = reduxState.resources.CloseupPinResource;
-      const firstKey = Object.keys(closeupRes)[0];
-      if (firstKey) {
-        pin = closeupRes[firstKey]?.data;
-      }
-    }
-
-    // Try 4: Look through all resources for anything with a pin id
-    if (!pin && reduxState?.resources) {
-      for (const [resName, resObj] of Object.entries(reduxState.resources) as [string, any][]) {
-        if (resName.toLowerCase().includes('pin')) {
-          const firstKey = Object.keys(resObj)[0];
-          if (firstKey && resObj[firstKey]?.data?.id) {
-            pin = resObj[firstKey].data;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!pin) {
-      const topLevelKeys = Object.keys(reduxState).join(', ');
-      const resourceKeys = reduxState?.resources ? Object.keys(reduxState.resources).join(', ') : 'keine';
-      const pinsCount = Object.keys(pinsMap).length;
-      return {
-        success: false,
-        error: `Pin ${pinId} nicht im Redux-State gefunden. `
-          + `Top-level keys: [${topLevelKeys}]. `
-          + `Resources: [${resourceKeys}]. `
-          + `pins count: ${pinsCount}`,
-      };
-    }
-
+    // Use Redux pin as primary data source for structured fields, v3 data as supplement
+    pin = pin || {};
     const now = new Date().toISOString();
-
-    // Extract annotations with URLs
-    const annotations: { name: string; url: string }[] = [];
-    const annotationsRaw = pin?.pin_join?.annotations_with_links;
-    if (annotationsRaw) {
-      const annotationsArray = Array.isArray(annotationsRaw)
-        ? annotationsRaw.flat()
-        : Object.values(annotationsRaw);
-      for (const item of annotationsArray as any[]) {
-        if (item?.name) {
-          annotations.push({
-            name: item.name,
-            url: item.url
-              ? (item.url.startsWith('http') ? item.url : `https://${domain}${item.url}`)
-              : '',
-          });
-        }
-      }
-    }
 
     // Extract all image sizes
     const images: Record<string, { url: string; width: number; height: number }> = {};
