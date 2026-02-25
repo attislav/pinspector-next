@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Pin Inspector - Bookmarklet</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; color: #333; }
+    h1 { color: #e60023; }
+    .bookmarklet-link {
+      display: inline-block;
+      background: #e60023;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 24px;
+      text-decoration: none;
+      font-weight: bold;
+      font-size: 16px;
+      margin: 20px 0;
+      cursor: grab;
+    }
+    .bookmarklet-link:hover { background: #c2001d; }
+    .steps { background: #f9f9f9; padding: 20px; border-radius: 12px; margin: 20px 0; }
+    .steps li { margin: 8px 0; }
+    code { background: #eee; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Pin Inspector Bookmarklet</h1>
+  <p>Ziehe den folgenden Button in deine <b>Lesezeichenleiste</b>:</p>
+
+  <a class="bookmarklet-link" href="javascript:void(function(){var m=location.href.match(/\/pin\/(\d+)/);if(!m)return alert('Keine Pin-ID in der URL gefunden');window.open('https://pinspector-next.vercel.app/pin-live?pinId='+m[1])})()">
+    Pin Inspector
+  </a>
+
+  <div class="steps">
+    <h3>Anleitung:</h3>
+    <ol>
+      <li>Zeige deine <b>Lesezeichenleiste</b> an (<code>Strg+Shift+B</code>)</li>
+      <li><b>Ziehe</b> den roten Button oben in die Lesezeichenleiste</li>
+      <li>Gehe auf eine beliebige <b>Pinterest Pin-Seite</b></li>
+      <li>Klicke auf <b>"Pin Inspector"</b> in der Lesezeichenleiste</li>
+      <li>Ein neuer Tab mit allen Pin-Daten und Annotations wird geoeffnet</li>
+    </ol>
+  </div>
+
+  <h3>Was du siehst:</h3>
+  <ul>
+    <li>Pin-Bild, Titel, Description</li>
+    <li>Annotations als klickbare Chips (verlinkt zur Ideas-Seite)</li>
+    <li>Board, Pinner, Domain, Erstelldatum</li>
+    <li>Saves, Repins, Comments</li>
+    <li>Link zum Originalartikel</li>
+    <li>Rich Pin Metadata</li>
+  </ul>
+</body>
+</html>
