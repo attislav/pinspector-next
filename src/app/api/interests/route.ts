@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     const language = searchParams.get('language');
 
     // Validate sortBy to prevent injection
-    const validSortColumns = ['name', 'searches', 'last_scrape', 'last_update', 'search_diff'];
+    const validSortColumns = ['name', 'searches', 'last_scrape', 'last_update', 'search_diff', 'history_count', 'klp_count', 'related_count'];
     const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'last_scrape';
     const safeSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
 

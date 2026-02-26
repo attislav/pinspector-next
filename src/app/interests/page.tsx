@@ -300,9 +300,15 @@ export default function InterestsPage() {
                   </button>
                 </th>
                 <th className="px-3 py-3 text-left text-sm font-semibold text-gray-700">Kategorien</th>
-                <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700" title="History-Einträge">Hist.</th>
-                <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700" title="KLP Pivots">KLP</th>
-                <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700" title="Verwandte Interessen">Rel.</th>
+                <th className="px-2 py-3 text-center">
+                  <button onClick={() => handleSort('history_count')} className="flex items-center gap-0.5 text-xs font-semibold text-gray-700 hover:text-red-700 transition-colors mx-auto" title="History-Einträge">Hist. <SortIcon column="history_count" /></button>
+                </th>
+                <th className="px-2 py-3 text-center">
+                  <button onClick={() => handleSort('klp_count')} className="flex items-center gap-0.5 text-xs font-semibold text-gray-700 hover:text-red-700 transition-colors mx-auto" title="KLP Pivots">KLP <SortIcon column="klp_count" /></button>
+                </th>
+                <th className="px-2 py-3 text-center">
+                  <button onClick={() => handleSort('related_count')} className="flex items-center gap-0.5 text-xs font-semibold text-gray-700 hover:text-red-700 transition-colors mx-auto" title="Verwandte Interessen">Rel. <SortIcon column="related_count" /></button>
+                </th>
                 <th className="px-2 py-3 text-left">
                   <button onClick={() => handleSort('last_update')} className="flex items-center gap-1 text-xs font-semibold text-gray-700 hover:text-red-700 transition-colors">Upd. <SortIcon column="last_update" /></button>
                 </th>

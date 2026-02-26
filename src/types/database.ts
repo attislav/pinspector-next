@@ -154,7 +154,7 @@ export interface InterestFilters {
   maxWords?: number;
   minSearches?: number;
   maxSearches?: number;
-  sortBy?: 'name' | 'searches' | 'last_scrape' | 'last_update' | 'search_diff';
+  sortBy?: 'name' | 'searches' | 'last_scrape' | 'last_update' | 'search_diff' | 'history_count' | 'klp_count' | 'related_count';
   sortOrder?: 'asc' | 'desc';
   language?: string;
 }
