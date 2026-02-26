@@ -211,15 +211,47 @@ export function useIdeaDetail(id: string) {
     }
   };
 
+  // Build a map of annotation name → URL from top_annotations HTML
+  const annotationUrlMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!idea?.top_annotations) return map;
+    const regex = /<a\s+href="([^"]*)"[^>]*>([^<]*)<\/a>/g;
+    let match;
+    while ((match = regex.exec(idea.top_annotations)) !== null) {
+      const url = match[1];
+      const name = match[2];
+      if (url && url.includes('/ideas/')) {
+        map.set(name.toLowerCase(), url.startsWith('http') ? url : `https://www.pinterest.com${url}`);
+      }
+    }
+    return map;
+  }, [idea?.top_annotations]);
+
   const scrapeAnnotation = async (annotationName: string) => {
     setScrapingAnnotation(annotationName);
     try {
-      const response = await fetchWithTimeout('/api/find-or-scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: annotationName, language: idea?.language }),
-      });
-      const result = await response.json();
+      // Check if we have a direct URL for this annotation
+      const directUrl = annotationUrlMap.get(annotationName.toLowerCase());
+
+      let result;
+      if (directUrl) {
+        // Use direct scrape with URL (much more reliable)
+        const response = await fetchWithTimeout('/api/scrape', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: directUrl, skipIfRecent: true, language: idea?.language }),
+        });
+        result = await response.json();
+      } else {
+        // Fallback: find-or-scrape by name
+        const response = await fetchWithTimeout('/api/find-or-scrape', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: annotationName, language: idea?.language }),
+        });
+        result = await response.json();
+      }
+
       if (result.success && result.idea) {
         router.push(`/interests/${result.idea.id}`);
       } else {
@@ -232,7 +264,7 @@ export function useIdeaDetail(id: string) {
     }
   };
 
-  const scrapeAllAnnotations = async () => {
+  const scrapeAllAnnotations = async (mode: 'all' | 'missing' = 'all') => {
     if (!idea) return;
 
     // Collect all unique items from all sources, deduplicated by name (lowercase)
@@ -290,9 +322,25 @@ export function useIdeaDetail(id: string) {
       }
     }
 
+    // Filter out already existing items if mode is 'missing'
+    if (mode === 'missing') {
+      const filteredWithUrl = withUrl.filter(item => {
+        const idMatch = item.url.match(/\/ideas\/[^/]+\/(\d+)/);
+        const id = idMatch ? idMatch[1] : null;
+        if (id && existingIds.has(id)) return false;
+        if (existingNames.has(item.name.toLowerCase())) return false;
+        return true;
+      });
+      const filteredWithoutUrl = withoutUrl.filter(name => !existingNames.has(name.toLowerCase()));
+      withUrl.length = 0;
+      withUrl.push(...filteredWithUrl);
+      withoutUrl.length = 0;
+      withoutUrl.push(...filteredWithoutUrl);
+    }
+
     const totalCount = withUrl.length + withoutUrl.length;
-    if (totalCount === 0) { alert('Keine Annotations zum Scrapen gefunden.'); return; }
-    if (!confirm(`${totalCount} einzigartige Einträge gefunden:\n- ${withUrl.length} mit URL (direkt scrapen)\n- ${withoutUrl.length} ohne URL (per Suche)\n\nJetzt alle scrapen?`)) return;
+    if (totalCount === 0) { alert(mode === 'missing' ? 'Alle Annotations sind bereits in der DB!' : 'Keine Annotations zum Scrapen gefunden.'); return; }
+    if (!confirm(`${totalCount} ${mode === 'missing' ? 'fehlende' : 'einzigartige'} Einträge gefunden:\n- ${withUrl.length} mit URL (direkt scrapen)\n- ${withoutUrl.length} ohne URL (per Suche)\n\nJetzt scrapen?`)) return;
 
     setScrapingAllAnnotations(true);
     setAnnotationProgress({ current: 0, total: totalCount, currentName: '', success: 0, failed: 0 });

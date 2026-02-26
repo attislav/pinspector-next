@@ -64,11 +64,20 @@ export default function IdeaDetailPage() {
               isOpen={detail.copyMenuOpen === 'allKws'}
               onToggle={() => detail.setCopyMenuOpen(detail.copyMenuOpen === 'allKws' ? null : 'allKws')}
               onCopy={detail.copyAllKeywords} variant="green" />
-            <button onClick={detail.scrapeAllAnnotations} disabled={detail.scrapingAllAnnotations || detail.rescraping}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-50 text-sm">
-              {detail.scrapingAllAnnotations ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              Scrape Annotations
-            </button>
+            <div className="relative">
+              <div className="flex">
+                <button onClick={() => detail.scrapeAllAnnotations('missing')} disabled={detail.scrapingAllAnnotations || detail.rescraping}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-l-lg hover:bg-blue-200 transition-colors disabled:opacity-50 text-sm">
+                  {detail.scrapingAllAnnotations ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  Scrape Missing
+                </button>
+                <button onClick={() => detail.scrapeAllAnnotations('all')} disabled={detail.scrapingAllAnnotations || detail.rescraping}
+                  className="flex items-center px-2 py-2 bg-blue-200 text-blue-700 rounded-r-lg hover:bg-blue-300 transition-colors disabled:opacity-50 text-sm border-l border-blue-300"
+                  title="Alle Annotations scrapen (inkl. bereits vorhandene)">
+                  All
+                </button>
+              </div>
+            </div>
             <button onClick={detail.handleRescrape} disabled={detail.rescraping || detail.scrapingAllAnnotations}
               className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 text-sm">
               <RefreshCw className={`w-4 h-4 ${detail.rescraping ? 'animate-spin' : ''}`} />
