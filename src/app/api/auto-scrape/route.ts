@@ -104,7 +104,50 @@ async function scrapeAnnotations(
   ];
 
   stats.total = allItems.length;
-  const toScrape = allItems.slice(0, maxAnnotations);
+
+  // Check which items already exist in DB — prioritize missing ones
+  const allNames = allItems.map(item => item.name);
+  const allIds: string[] = [];
+  for (const item of allItems) {
+    if (item.hasUrl && item.url) {
+      const idMatch = item.url.match(/\/ideas\/[^/]+\/(\d+)/);
+      if (idMatch) allIds.push(idMatch[1]);
+    }
+  }
+
+  const existingIdSet = new Set<string>();
+  const existingNameSet = new Set<string>();
+
+  if (allIds.length > 0) {
+    const { data } = await supabase.from('ideas').select('id').in('id', allIds);
+    if (data) data.forEach(row => existingIdSet.add(row.id));
+  }
+
+  if (allNames.length > 0) {
+    // Check in batches of 50
+    for (let i = 0; i < allNames.length; i += 50) {
+      const batch = allNames.slice(i, i + 50);
+      const orFilter = batch.map(n => `name.ilike.${n}`).join(',');
+      const { data } = await supabase.from('ideas').select('name').or(orFilter);
+      if (data) data.forEach(row => existingNameSet.add(row.name.toLowerCase()));
+    }
+  }
+
+  const isMissing = (item: typeof allItems[0]) => {
+    if (item.hasUrl && item.url) {
+      const idMatch = item.url.match(/\/ideas\/[^/]+\/(\d+)/);
+      if (idMatch && existingIdSet.has(idMatch[1])) return false;
+    }
+    if (existingNameSet.has(item.name.toLowerCase())) return false;
+    return true;
+  };
+
+  // Sort: missing items first, then existing
+  const missing = allItems.filter(isMissing);
+  const existing = allItems.filter(item => !isMissing(item));
+  const sorted = [...missing, ...existing];
+
+  const toScrape = sorted.slice(0, maxAnnotations);
 
   for (const item of toScrape) {
     try {
