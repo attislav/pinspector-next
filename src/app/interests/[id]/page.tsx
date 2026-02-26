@@ -53,7 +53,10 @@ export default function IdeaDetailPage() {
         </button>
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-red-900 mb-2">{idea.name}</h1>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-2xl md:text-3xl font-bold text-red-900">{idea.name}</h1>
+              {idea.language && <span className="px-2 py-1 text-xs font-bold bg-gray-100 text-gray-600 rounded uppercase">{idea.language}</span>}
+            </div>
             <p className="text-gray-500 font-mono text-sm">ID: {idea.id}</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
@@ -142,7 +145,7 @@ export default function IdeaDetailPage() {
         onCopy={detail.copyKlpPivots}
         onItemClick={detail.scrapeAndNavigate}
         scrapingUrl={detail.scrapingUrl}
-        colorClass="bg-orange-50 hover:bg-orange-100 text-orange-700 hover:text-orange-800"
+        existingIds={detail.existingIds}
       />
 
       {/* Verwandte Interessen */}
@@ -155,7 +158,7 @@ export default function IdeaDetailPage() {
         onCopy={detail.copyRelatedInterests}
         onItemClick={detail.scrapeAndNavigate}
         scrapingUrl={detail.scrapingUrl}
-        colorClass="bg-gray-100 hover:bg-red-100 text-gray-700 hover:text-red-800"
+        existingIds={detail.existingIds}
       />
 
       {/* Top Annotations */}
@@ -167,6 +170,7 @@ export default function IdeaDetailPage() {
         onCopy={detail.copyAnnotations}
         onAnnotationClick={detail.scrapeAnnotation}
         scrapingAnnotation={detail.scrapingAnnotation}
+        existingNames={detail.existingNames}
       />
 
       {/* Image Enlargement Modal */}
@@ -201,6 +205,7 @@ export default function IdeaDetailPage() {
         keywordsCopied={detail.keywordsCopied}
         onExtract={detail.extractKeywordsFromTitles}
         onCopyKeywords={detail.copyExtractedKeywords}
+        existingNames={detail.existingNames}
       />
 
       {/* History Table */}

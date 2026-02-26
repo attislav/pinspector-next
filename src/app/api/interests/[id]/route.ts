@@ -1,19 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryOne } from '@/lib/db';
-
-interface DbIdea {
-  id: string;
-  name: string;
-  url: string | null;
-  searches: number;
-  last_update: Date | null;
-  last_scrape: Date | null;
-  created_at: Date | null;
-  related_interests: string | null;
-  top_annotations: string | null;
-  seo_breadcrumbs: string | null;
-  klp_pivots: string | null;
-}
+import { getSupabase } from '@/lib/db';
 
 export async function GET(
   request: NextRequest,
@@ -29,30 +15,21 @@ export async function GET(
       );
     }
 
-    const idea = await queryOne<DbIdea>(
-      'SELECT * FROM public.ideas WHERE id = $1',
-      [id]
-    );
+    const supabase = getSupabase();
+    const { data: idea, error } = await supabase
+      .from('ideas')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-    if (!idea) {
+    if (error || !idea) {
       return NextResponse.json(
         { error: 'Idea nicht gefunden' },
         { status: 404 }
       );
     }
 
-    // Transform to match expected format
-    const result = {
-      ...idea,
-      last_update: idea.last_update?.toISOString() || null,
-      last_scrape: idea.last_scrape?.toISOString() || null,
-      created_at: idea.created_at?.toISOString() || idea.last_scrape?.toISOString() || null,
-      related_interests: idea.related_interests ? JSON.parse(idea.related_interests) : [],
-      seo_breadcrumbs: idea.seo_breadcrumbs ? JSON.parse(idea.seo_breadcrumbs) : [],
-      klp_pivots: idea.klp_pivots ? JSON.parse(idea.klp_pivots) : [],
-    };
-
-    return NextResponse.json(result);
+    return NextResponse.json(idea);
   } catch (error) {
     console.error('API error:', error);
     return NextResponse.json(

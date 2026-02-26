@@ -39,10 +39,74 @@ export function useIdeaDetail(id: string) {
   const [contentAnalysis, setContentAnalysis] = useState<string | null>(null);
   const [allKwsCopied, setAllKwsCopied] = useState(false);
   const [copyMenuOpen, setCopyMenuOpen] = useState<CopyMenuType>(null);
+  const [existingIds, setExistingIds] = useState<Set<string>>(new Set());
+  const [existingNames, setExistingNames] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (id) fetchData();
   }, [id]);
+
+  // Check which related ideas already exist in our DB
+  useEffect(() => {
+    if (!idea || pins.length === 0) return;
+
+    const idsToCheck = new Set<string>();
+
+    // Extract IDs from KLP pivot URLs (/ideas/something/123456/)
+    if (idea.klp_pivots) {
+      for (const p of idea.klp_pivots) {
+        const match = p.url?.match(/\/ideas\/[^/]+\/(\d+)/);
+        if (match) idsToCheck.add(match[1]);
+      }
+    }
+
+    // Extract IDs from related interest URLs
+    if (idea.related_interests) {
+      for (const ri of idea.related_interests) {
+        if (ri.id) idsToCheck.add(ri.id);
+        const match = ri.url?.match(/\/ideas\/[^/]+\/(\d+)/);
+        if (match) idsToCheck.add(match[1]);
+      }
+    }
+
+    // Extract IDs from top_annotations URLs
+    if (idea.top_annotations) {
+      const urlRegex = /href="[^"]*\/ideas\/[^/]+\/(\d+)[^"]*"/g;
+      let match;
+      while ((match = urlRegex.exec(idea.top_annotations)) !== null) {
+        idsToCheck.add(match[1]);
+      }
+    }
+
+    // Extract IDs from pin annotations - annotations are names, not URLs
+    // We need to check by name instead. Collect unique annotation names.
+    const annotationNames = new Set<string>();
+    for (const pin of pins) {
+      if (pin.annotations) {
+        for (const a of pin.annotations) {
+          annotationNames.add(a);
+        }
+      }
+    }
+
+    if (idsToCheck.size === 0 && annotationNames.size === 0) return;
+
+    // Batch check IDs and names in one request
+    fetchWithTimeout('/api/interests/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ids: Array.from(idsToCheck),
+        names: Array.from(annotationNames),
+      }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        setExistingIds(new Set<string>(data.ids || []));
+        setExistingNames(new Set<string>((data.names || []).map((n: string) => n.toLowerCase())));
+      })
+      .catch(() => {});
+  }, [idea, pins]);
 
   // Close copy menu when clicking outside
   useEffect(() => {
@@ -157,62 +221,86 @@ export function useIdeaDetail(id: string) {
 
   const scrapeAllAnnotations = async () => {
     if (!idea) return;
-    const allNames = new Set<string>();
-    const klpPivotUrls: { name: string; url: string }[] = [];
-    const relatedInterestUrls: { name: string; url: string }[] = [];
-    const topAnnotationNames: string[] = [];
 
+    // Collect all unique items from all sources, deduplicated by name (lowercase)
+    const seen = new Set<string>();
+    const withUrl: { name: string; url: string }[] = [];
+    const withoutUrl: string[] = [];
+
+    // 1. KLP Pivots (have URLs)
     if (idea.klp_pivots) {
       for (const pivot of idea.klp_pivots) {
-        if (pivot.url && !allNames.has(pivot.name.toLowerCase())) {
-          allNames.add(pivot.name.toLowerCase());
-          klpPivotUrls.push({ name: pivot.name, url: pivot.url });
-        }
-      }
-    }
-    if (idea.related_interests) {
-      for (const interest of idea.related_interests) {
-        if (interest.url && !allNames.has(interest.name.toLowerCase())) {
-          allNames.add(interest.name.toLowerCase());
-          relatedInterestUrls.push({ name: interest.name, url: interest.url });
-        }
-      }
-    }
-    if (idea.top_annotations) {
-      const regex = /<a[^>]*>([^<]*)<\/a>/g;
-      let match;
-      while ((match = regex.exec(idea.top_annotations)) !== null) {
-        if (!allNames.has(match[1].toLowerCase())) {
-          allNames.add(match[1].toLowerCase());
-          topAnnotationNames.push(match[1]);
+        if (pivot.url && !seen.has(pivot.name.toLowerCase())) {
+          seen.add(pivot.name.toLowerCase());
+          withUrl.push({ name: pivot.name, url: pivot.url });
         }
       }
     }
 
-    const totalCount = klpPivotUrls.length + relatedInterestUrls.length + topAnnotationNames.length;
+    // 2. Related Interests (have URLs)
+    if (idea.related_interests) {
+      for (const interest of idea.related_interests) {
+        if (interest.url && !seen.has(interest.name.toLowerCase())) {
+          seen.add(interest.name.toLowerCase());
+          withUrl.push({ name: interest.name, url: interest.url });
+        }
+      }
+    }
+
+    // 3. Top Annotations (have URLs in href)
+    if (idea.top_annotations) {
+      const regex = /<a\s+href="([^"]*)"[^>]*>([^<]*)<\/a>/g;
+      let match;
+      while ((match = regex.exec(idea.top_annotations)) !== null) {
+        const url = match[1];
+        const name = match[2];
+        if (!seen.has(name.toLowerCase())) {
+          seen.add(name.toLowerCase());
+          if (url && url.includes('/ideas/')) {
+            withUrl.push({ name, url: url.startsWith('http') ? url : `https://www.pinterest.com${url}` });
+          } else {
+            withoutUrl.push(name);
+          }
+        }
+      }
+    }
+
+    // 4. Pin Annotations (names only, no URLs)
+    for (const pin of pins) {
+      if (pin.annotations) {
+        for (const annotation of pin.annotations) {
+          if (!seen.has(annotation.toLowerCase())) {
+            seen.add(annotation.toLowerCase());
+            withoutUrl.push(annotation);
+          }
+        }
+      }
+    }
+
+    const totalCount = withUrl.length + withoutUrl.length;
     if (totalCount === 0) { alert('Keine Annotations zum Scrapen gefunden.'); return; }
-    if (!confirm(`${totalCount} einzigartige Einträge gefunden:\n- ${klpPivotUrls.length} Keyword Pivots\n- ${relatedInterestUrls.length} Verwandte Interessen\n- ${topAnnotationNames.length} Top Annotations\n\nJetzt alle scrapen?`)) return;
+    if (!confirm(`${totalCount} einzigartige Einträge gefunden:\n- ${withUrl.length} mit URL (direkt scrapen)\n- ${withoutUrl.length} ohne URL (per Suche)\n\nJetzt alle scrapen?`)) return;
 
     setScrapingAllAnnotations(true);
     setAnnotationProgress({ current: 0, total: totalCount, currentName: '', success: 0, failed: 0 });
     let current = 0, success = 0, failed = 0;
 
     try {
-      const scrapeItem = async (name: string, body: object) => {
+      // Scrape items with URL via /api/scrape
+      for (const item of withUrl) {
         current++;
-        setAnnotationProgress({ current, total: totalCount, currentName: name, success, failed });
+        setAnnotationProgress({ current, total: totalCount, currentName: item.name, success, failed });
         try {
-          const response = await fetchWithTimeout('/api/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const response = await fetchWithTimeout('/api/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: item.url, skipIfRecent: true, language: idea?.language }) });
           const result = await response.json();
           result.success ? success++ : failed++;
         } catch { failed++; }
-        setAnnotationProgress({ current, total: totalCount, currentName: name, success, failed });
+        setAnnotationProgress({ current, total: totalCount, currentName: item.name, success, failed });
         await new Promise(resolve => setTimeout(resolve, 300));
-      };
+      }
 
-      for (const pivot of klpPivotUrls) await scrapeItem(pivot.name, { url: pivot.url, skipIfRecent: true, language: idea?.language });
-      for (const interest of relatedInterestUrls) await scrapeItem(interest.name, { url: interest.url, skipIfRecent: true, language: idea?.language });
-      for (const name of topAnnotationNames) {
+      // Scrape items without URL via /api/find-or-scrape
+      for (const name of withoutUrl) {
         current++;
         setAnnotationProgress({ current, total: totalCount, currentName: name, success, failed });
         try {
@@ -223,6 +311,7 @@ export function useIdeaDetail(id: string) {
         setAnnotationProgress({ current, total: totalCount, currentName: name, success, failed });
         await new Promise(resolve => setTimeout(resolve, 300));
       }
+
       alert(`Scraping abgeschlossen!\n\nErfolgreich: ${success}\nFehlgeschlagen: ${failed}`);
     } finally {
       setScrapingAllAnnotations(false);
@@ -355,5 +444,6 @@ export function useIdeaDetail(id: string) {
     copyMenuOpen, setCopyMenuOpen, copyAnnotations,
     scrapeAndNavigate, handleRescrape,
     sortedPins, parseAnnotations,
+    existingIds, existingNames,
   };
 }

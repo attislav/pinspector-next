@@ -110,4 +110,36 @@ export function detectLanguageFromUrl(url: string): SupportedLanguage | null {
   return null;
 }
 
+/**
+ * Detect language from Pinterest canonical_domain (from page_metadata).
+ * E.g. "de.pinterest.com" → "de", "www.pinterest.com" → "en"
+ */
+export function detectLanguageFromCanonicalDomain(domain: string): SupportedLanguage | null {
+  if (!domain) return null;
+  const match = domain.match(/^([a-z]{2})\.pinterest\.com$/);
+  if (match) {
+    const subdomain = match[1];
+    if (subdomain === 'br') return 'pt';
+    if (isSupportedLanguage(subdomain)) return subdomain;
+  }
+  // www.pinterest.com = global/English domain
+  if (domain === 'www.pinterest.com') return 'en';
+  return null;
+}
+
+/**
+ * Detect language from Pinterest url_name prefix.
+ * E.g. "de:grundriss-wohn-essbereich" → "de", "women's-style" → null (no prefix)
+ */
+export function detectLanguageFromUrlName(urlName: string): SupportedLanguage | null {
+  if (!urlName) return null;
+  const match = urlName.match(/^([a-z]{2}):/);
+  if (match) {
+    const prefix = match[1];
+    if (prefix === 'br') return 'pt';
+    if (isSupportedLanguage(prefix)) return prefix;
+  }
+  return null;
+}
+
 export { SUPPORTED_LANGUAGES };

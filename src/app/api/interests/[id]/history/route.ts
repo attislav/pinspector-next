@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-
-interface DbHistory {
-  id: number;
-  idea_id: string;
-  name: string;
-  searches: number;
-  scrape_date: Date | null;
-}
+import { getSupabase } from '@/lib/db';
+import { IdeaHistory } from '@/types/database';
 
 export async function GET(
   request: NextRequest,
@@ -23,23 +16,14 @@ export async function GET(
       );
     }
 
-    // Get only one entry per month (the last one of each month)
-    const history = await query<DbHistory>(
-      `SELECT DISTINCT ON (date_trunc('month', scrape_date))
-         id, idea_id, name, searches, scrape_date
-       FROM public.idea_history
-       WHERE idea_id = $1
-       ORDER BY date_trunc('month', scrape_date) ASC, scrape_date DESC`,
-      [id]
-    );
+    const supabase = getSupabase();
+    const { data, error } = await supabase.rpc('get_monthly_history', {
+      p_idea_id: id,
+    });
 
-    // Transform dates to ISO strings
-    const result = history.map(h => ({
-      ...h,
-      scrape_date: h.scrape_date?.toISOString() || null,
-    }));
+    if (error) throw error;
 
-    return NextResponse.json(result);
+    return NextResponse.json((data || []) as IdeaHistory[]);
   } catch (error) {
     console.error('API error:', error);
     return NextResponse.json(

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { getSupabase } from '@/lib/db';
 import { searchGoogle } from '@/lib/search';
 import { scrapePinterestIdea, isValidPinterestIdeasUrl, extractIdFromUrl } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
@@ -93,12 +93,13 @@ export async function POST(request: NextRequest) {
     if (skipExisting && urls.length > 0) {
       const ids = urls.map(u => extractIdFromUrl(u)).filter(Boolean) as string[];
       if (ids.length > 0) {
-        const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
-        const existing = await query<{ id: string }>(
-          `SELECT id FROM public.ideas WHERE id IN (${placeholders})`,
-          ids
-        );
-        const existingIds = new Set(existing.map(e => e.id));
+        const supabase = getSupabase();
+        const { data: existing } = await supabase
+          .from('ideas')
+          .select('id')
+          .in('id', ids);
+
+        const existingIds = new Set((existing || []).map(e => e.id));
         urls = urls.filter(u => {
           const id = extractIdFromUrl(u);
           return !id || !existingIds.has(id);

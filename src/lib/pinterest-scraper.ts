@@ -1,4 +1,5 @@
 import { Idea, RelatedInterest, ScrapeResult, Pin, KlpPivot, PinDetail, PinDetailResult } from '@/types/database';
+import { detectLanguageFromCanonicalDomain, detectLanguageFromUrlName, SupportedLanguage } from '@/lib/language-config';
 
 // User agents for rotation (keep these up-to-date with current browser versions)
 const USER_AGENTS = [
@@ -30,6 +31,25 @@ function normalizeUrl(url: string, targetDomain?: string): string {
   }
   // Fallback: keep original domain
   return url;
+}
+
+// Detect language from Pinterest's own data (canonical_domain + url_name prefix)
+function detectLanguageFromPinterestData(interestData: any): SupportedLanguage | null {
+  // 1. url_name prefix is most reliable: "de:grundriss..." → "de"
+  const urlName = interestData?.url_name;
+  if (urlName) {
+    const fromUrlName = detectLanguageFromUrlName(urlName);
+    if (fromUrlName) return fromUrlName;
+  }
+
+  // 2. canonical_domain: "de.pinterest.com" → "de", "www.pinterest.com" → "en"
+  const canonicalDomain = interestData?.page_metadata?.canonical_domain;
+  if (canonicalDomain) {
+    const fromDomain = detectLanguageFromCanonicalDomain(canonicalDomain);
+    if (fromDomain) return fromDomain;
+  }
+
+  return null;
 }
 
 export interface ScrapeOptions {
@@ -376,7 +396,7 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
       top_annotations: topAnnotations,
       seo_breadcrumbs: seoBreadcrumbs,
       klp_pivots: klpPivots,
-      language: options?.language || null,
+      language: detectLanguageFromPinterestData(interestData) || options?.language || null,
       created_at: now,
     };
 

@@ -34,6 +34,7 @@ interface PinsTableProps {
   keywordsCopied: boolean;
   onExtract: () => void;
   onCopyKeywords: () => void;
+  existingNames?: Set<string>;
 }
 
 function SortIcon({ column, sortBy, sortOrder }: { column: PinSortKey; sortBy: PinSortKey | null; sortOrder: 'asc' | 'desc' }) {
@@ -47,6 +48,7 @@ export function PinsTable({
   scrapingAnnotation, onAnnotationClick,
   ideaName, analyzingContent, contentAnalysis, onAnalyze, onClearAnalysis,
   extractingKeywords, extractedKeywords, keywordsCopied, onExtract, onCopyKeywords,
+  existingNames,
 }: PinsTableProps) {
   if (sortedPins.length === 0) return null;
 
@@ -163,12 +165,19 @@ export function PinsTable({
                 <td className="py-2 px-2 text-gray-500 whitespace-nowrap text-xs">{formatPinDate(pin.pin_created_at)}</td>
                 <td className="py-2 px-2">
                   <div className="flex flex-wrap gap-1 max-w-[280px]">
-                    {pin.annotations?.map((annotation, idx) => (
-                      <button key={idx} onClick={() => onAnnotationClick(annotation)} disabled={scrapingAnnotation === annotation}
-                        className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full whitespace-nowrap hover:bg-red-200 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1">
-                        {scrapingAnnotation === annotation && <Loader2 className="w-2 h-2 animate-spin" />}{annotation}
-                      </button>
-                    ))}
+                    {pin.annotations?.map((annotation, idx) => {
+                      const exists = existingNames?.has(annotation.toLowerCase());
+                      return (
+                        <button key={idx} onClick={() => onAnnotationClick(annotation)} disabled={scrapingAnnotation === annotation}
+                          className={`text-xs px-1.5 py-0.5 rounded-full whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1 ${
+                            exists
+                              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                              : 'bg-red-100 text-red-700 hover:bg-red-200'
+                          }`}>
+                          {scrapingAnnotation === annotation && <Loader2 className="w-2 h-2 animate-spin" />}{annotation}
+                        </button>
+                      );
+                    })}
                   </div>
                 </td>
                 <td className="py-2 px-2 text-right text-gray-900 font-medium">{formatNumber(pin.save_count)}</td>
@@ -217,12 +226,19 @@ export function PinsTable({
             </div>
             {pin.annotations && pin.annotations.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-2">
-                {pin.annotations.slice(0, 5).map((annotation, idx) => (
-                  <button key={idx} onClick={() => onAnnotationClick(annotation)} disabled={scrapingAnnotation === annotation}
-                    className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full hover:bg-red-200 disabled:opacity-50 flex items-center gap-1">
-                    {scrapingAnnotation === annotation && <Loader2 className="w-2 h-2 animate-spin" />}{annotation}
-                  </button>
-                ))}
+                {pin.annotations.slice(0, 5).map((annotation, idx) => {
+                  const exists = existingNames?.has(annotation.toLowerCase());
+                  return (
+                    <button key={idx} onClick={() => onAnnotationClick(annotation)} disabled={scrapingAnnotation === annotation}
+                      className={`text-xs px-1.5 py-0.5 rounded-full disabled:opacity-50 flex items-center gap-1 ${
+                        exists
+                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                          : 'bg-red-100 text-red-700 hover:bg-red-200'
+                      }`}>
+                      {scrapingAnnotation === annotation && <Loader2 className="w-2 h-2 animate-spin" />}{annotation}
+                    </button>
+                  );
+                })}
                 {pin.annotations.length > 5 && <span className="text-xs text-gray-400">+{pin.annotations.length - 5}</span>}
               </div>
             )}

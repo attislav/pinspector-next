@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryOne } from '@/lib/db';
+import { getSupabase } from '@/lib/db';
 import { scrapePinterestIdea, extractIdFromUrl } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
 import { getLanguageConfig, detectLanguageFromUrl } from '@/lib/language-config';
 
 export const maxDuration = 30;
-
-interface DbIdea {
-  id: string;
-  searches: number;
-  last_update: Date | null;
-  last_scrape: Date | null;
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,10 +23,12 @@ export async function POST(request: NextRequest) {
     if (skipIfRecent) {
       const idFromUrl = extractIdFromUrl(url);
       if (idFromUrl) {
-        const existingIdea = await queryOne<DbIdea>(
-          'SELECT * FROM public.ideas WHERE id = $1',
-          [idFromUrl]
-        );
+        const supabase = getSupabase();
+        const { data: existingIdea } = await supabase
+          .from('ideas')
+          .select('*')
+          .eq('id', idFromUrl)
+          .single();
 
         if (existingIdea) {
           // Check if scraped within the last hour

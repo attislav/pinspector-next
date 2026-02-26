@@ -7,10 +7,13 @@ import {
   RefreshCw, Eye, ArrowUpDown, ArrowUp, ArrowDown, Loader2,
 } from 'lucide-react';
 import { Idea, InterestFilters, PaginatedResponse, CategoriesResponse } from '@/types/database';
-import { formatNumber, formatDateShort } from '@/lib/format';
+import { formatNumber, formatCompactNumber, formatDateShort, formatShortDate } from '@/lib/format';
+import { useLanguage } from '@/context/LanguageContext';
+
+type IdeaRow = Idea & { history_count?: number; prev_searches?: number | null };
 
 export default function InterestsPage() {
-  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [ideas, setIdeas] = useState<IdeaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -27,6 +30,7 @@ export default function InterestsPage() {
     subCategories: {},
   });
   const [availableSubCategories, setAvailableSubCategories] = useState<string[]>([]);
+  const { language: globalLanguage } = useLanguage();
   const [rescraping, setRescraping] = useState(false);
   const [rescrapeProgress, setRescrapeProgress] = useState({ current: 0, total: 0, currentName: '' });
 
@@ -42,8 +46,12 @@ export default function InterestsPage() {
           Object.entries(filters).filter(([_, v]) => v !== undefined && v !== '')
         ),
       });
+      // Use global language from nav if set (overrides filter)
+      if (globalLanguage) {
+        params.set('language', globalLanguage);
+      }
       const response = await fetch(`/api/interests?${params}`);
-      const data: PaginatedResponse<Idea> = await response.json();
+      const data: PaginatedResponse<IdeaRow> = await response.json();
       setIdeas(data.data);
       setTotal(data.total);
     } catch (error) {
@@ -51,7 +59,7 @@ export default function InterestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, filters]);
+  }, [page, pageSize, filters, globalLanguage]);
 
   useEffect(() => { fetchIdeas(); }, [fetchIdeas]);
 
@@ -129,8 +137,20 @@ export default function InterestsPage() {
   const toggleSelectAll = () => { selectedIds.size === ideas.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(ideas.map(idea => idea.id))); };
   const toggleSelect = (id: string) => { setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); };
 
-  const handleSort = (column: 'name' | 'searches' | 'last_scrape') => {
+  const handleSort = (column: InterestFilters['sortBy']) => {
+    if (!column) return;
     setFilters(prev => ({ ...prev, sortBy: column, sortOrder: prev.sortBy === column && prev.sortOrder === 'desc' ? 'asc' : 'desc' }));
+    setPage(1);
+  };
+
+  // Searches column cycles: searches desc -> searches asc -> search_diff desc -> search_diff asc
+  const handleSearchesSort = () => {
+    setFilters(prev => {
+      if (prev.sortBy === 'searches' && prev.sortOrder === 'desc') return { ...prev, sortBy: 'searches' as const, sortOrder: 'asc' as const };
+      if (prev.sortBy === 'searches' && prev.sortOrder === 'asc') return { ...prev, sortBy: 'search_diff' as const, sortOrder: 'desc' as const };
+      if (prev.sortBy === 'search_diff' && prev.sortOrder === 'desc') return { ...prev, sortBy: 'search_diff' as const, sortOrder: 'asc' as const };
+      return { ...prev, sortBy: 'searches' as const, sortOrder: 'desc' as const };
+    });
     setPage(1);
   };
 
@@ -236,8 +256,10 @@ export default function InterestsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Sortieren nach</label>
                 <select value={filters.sortBy || 'last_scrape'} onChange={(e) => setFilters({ ...filters, sortBy: e.target.value as InterestFilters['sortBy'] })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
                   <option value="last_scrape">Zuletzt gescraped</option>
+                  <option value="last_update">Zuletzt aktualisiert</option>
                   <option value="name">Name</option>
                   <option value="searches">Suchanfragen</option>
+                  <option value="search_diff">Differenz (Zuwachs/Verlust)</option>
                 </select>
               </div>
               <div>
@@ -248,7 +270,7 @@ export default function InterestsPage() {
                 </select>
               </div>
               <div className="col-span-2 flex items-end">
-                <button onClick={() => { setFilters({ search: '', sortBy: 'searches', sortOrder: 'desc' }); setPage(1); }} className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900">
+                <button onClick={() => { setFilters({ search: '', sortBy: 'searches', sortOrder: 'desc', language: undefined }); setPage(1); }} className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900">
                   <X className="w-4 h-4" /> Filter zurücksetzen
                 </button>
               </div>
@@ -263,51 +285,93 @@ export default function InterestsPage() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-4 py-3 text-left">
+                <th className="px-3 py-3 text-left">
                   <input type="checkbox" checked={ideas.length > 0 && selectedIds.size === ideas.length} onChange={toggleSelectAll} className="rounded border-gray-300" />
                 </th>
-                <th className="px-4 py-3 text-left">
+                <th className="px-3 py-3 text-left">
                   <button onClick={() => handleSort('name')} className="flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-red-700 transition-colors">Name <SortIcon column="name" /></button>
                 </th>
-                <th className="px-4 py-3 text-right">
-                  <button onClick={() => handleSort('searches')} className="flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-red-700 transition-colors ml-auto">Suchanfragen <SortIcon column="searches" /></button>
+                <th className="px-3 py-3 text-right">
+                  <button onClick={handleSearchesSort} className="flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-red-700 transition-colors ml-auto">
+                    {filters.sortBy === 'search_diff' ? 'Diff' : 'Searches'}
+                    {(filters.sortBy === 'searches' || filters.sortBy === 'search_diff') ? (
+                      filters.sortOrder === 'asc' ? <ArrowUp className="w-4 h-4 text-red-600" /> : <ArrowDown className="w-4 h-4 text-red-600" />
+                    ) : <ArrowUpDown className="w-4 h-4 text-gray-400" />}
+                  </button>
                 </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Kategorien</th>
-                <th className="px-4 py-3 text-left">
-                  <button onClick={() => handleSort('last_scrape')} className="flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-red-700 transition-colors">Gescraped <SortIcon column="last_scrape" /></button>
+                <th className="px-3 py-3 text-left text-sm font-semibold text-gray-700">Kategorien</th>
+                <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700" title="History-Einträge">Hist.</th>
+                <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700" title="KLP Pivots">KLP</th>
+                <th className="px-2 py-3 text-center text-xs font-semibold text-gray-700" title="Verwandte Interessen">Rel.</th>
+                <th className="px-2 py-3 text-left">
+                  <button onClick={() => handleSort('last_update')} className="flex items-center gap-1 text-xs font-semibold text-gray-700 hover:text-red-700 transition-colors">Upd. <SortIcon column="last_update" /></button>
                 </th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Aktionen</th>
+                <th className="px-2 py-3 text-left">
+                  <button onClick={() => handleSort('last_scrape')} className="flex items-center gap-1 text-xs font-semibold text-gray-700 hover:text-red-700 transition-colors">Scr. <SortIcon column="last_scrape" /></button>
+                </th>
+                <th className="px-3 py-3 text-right text-sm font-semibold text-gray-700">Aktionen</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-500"><RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" />Lade Daten...</td></tr>
+                <tr><td colSpan={10} className="px-4 py-12 text-center text-gray-500"><RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" />Lade Daten...</td></tr>
               ) : ideas.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-500">Keine Interessen gefunden</td></tr>
+                <tr><td colSpan={10} className="px-4 py-12 text-center text-gray-500">Keine Interessen gefunden</td></tr>
               ) : (
-                ideas.map((idea) => (
-                  <tr key={idea.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3"><input type="checkbox" checked={selectedIds.has(idea.id)} onChange={() => toggleSelect(idea.id)} className="rounded border-gray-300" /></td>
-                    <td className="px-4 py-3">
-                      <Link href={`/interests/${idea.id}`} className="font-medium text-red-700 hover:text-red-900 hover:underline">{idea.name}</Link>
-                      <div className="text-xs text-gray-500 font-mono">{idea.id}</div>
-                    </td>
-                    <td className="px-4 py-3 text-right"><span className="font-semibold text-red-700">{formatNumber(idea.searches)}</span></td>
-                    <td className="px-4 py-3">
-                      <div className="text-sm text-gray-600 truncate max-w-xs">
-                        {idea.seo_breadcrumbs?.map((crumb: string | { name: string }) => typeof crumb === 'string' ? crumb : crumb.name).join(' > ') || '-'}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{formatDateShort(idea.last_scrape)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        <Link href={`/interests/${idea.id}`} className="p-2 text-gray-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors" title="Details anzeigen"><Eye className="w-4 h-4" /></Link>
-                        <a href={idea.url || '#'} target="_blank" rel="noopener noreferrer" className="p-2 text-gray-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors" title="Auf Pinterest öffnen"><ExternalLink className="w-4 h-4" /></a>
-                        <button onClick={() => handleDelete(idea.id)} className="p-2 text-gray-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors" title="Löschen"><Trash2 className="w-4 h-4" /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                ideas.map((idea) => {
+                  const klpCount = idea.klp_pivots?.length || 0;
+                  const relCount = idea.related_interests?.length || 0;
+                  const histCount = idea.history_count ?? 0;
+                  return (
+                    <tr key={idea.id} className="hover:bg-gray-50">
+                      <td className="px-3 py-2.5"><input type="checkbox" checked={selectedIds.has(idea.id)} onChange={() => toggleSelect(idea.id)} className="rounded border-gray-300" /></td>
+                      <td className="px-3 py-2.5">
+                        <Link href={`/interests/${idea.id}`} className="font-medium text-red-700 hover:text-red-900 hover:underline">{idea.name}</Link>
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <span className="font-semibold text-red-700">{formatCompactNumber(idea.searches)}</span>
+                        {idea.prev_searches != null && (() => {
+                          const diff = idea.searches - idea.prev_searches!;
+                          if (diff === 0) return null;
+                          return (
+                            <span className={`block text-xs font-medium ${diff > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                              {diff > 0 ? '+' : ''}{formatCompactNumber(diff)}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="text-sm text-gray-600 truncate max-w-[200px]">
+                          {idea.seo_breadcrumbs?.map((crumb: string | { name: string }) => typeof crumb === 'string' ? crumb : crumb.name).join(' > ') || '-'}
+                        </div>
+                      </td>
+                      <td className="px-2 py-2.5 text-center">
+                        {histCount > 0
+                          ? <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">{histCount}</span>
+                          : <span className="text-gray-300">-</span>}
+                      </td>
+                      <td className="px-2 py-2.5 text-center">
+                        {klpCount > 0
+                          ? <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold">{klpCount}</span>
+                          : <span className="text-gray-300">-</span>}
+                      </td>
+                      <td className="px-2 py-2.5 text-center">
+                        {relCount > 0
+                          ? <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-purple-100 text-purple-700 text-xs font-semibold">{relCount}</span>
+                          : <span className="text-gray-300">-</span>}
+                      </td>
+                      <td className="px-2 py-2.5 text-xs text-gray-500 whitespace-nowrap">{idea.last_update ? formatShortDate(idea.last_update) : '-'}</td>
+                      <td className="px-2 py-2.5 text-xs text-gray-500 whitespace-nowrap">{formatShortDate(idea.last_scrape)}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex justify-end gap-1">
+                          <Link href={`/interests/${idea.id}`} className="p-1.5 text-gray-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors" title="Details"><Eye className="w-4 h-4" /></Link>
+                          <a href={idea.url || '#'} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors" title="Pinterest"><ExternalLink className="w-4 h-4" /></a>
+                          <button onClick={() => handleDelete(idea.id)} className="p-1.5 text-gray-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors" title="Löschen"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -330,30 +394,54 @@ export default function InterestsPage() {
         ) : ideas.length === 0 ? (
           <div className="text-center py-12 text-gray-500">Keine Interessen gefunden</div>
         ) : (
-          ideas.map((idea) => (
-            <div key={idea.id} className="bg-white rounded-lg border border-gray-200 p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <input type="checkbox" checked={selectedIds.has(idea.id)} onChange={() => toggleSelect(idea.id)} className="rounded border-gray-300 mt-1" />
-                  <div className="min-w-0">
-                    <Link href={`/interests/${idea.id}`} className="font-medium text-red-700 hover:text-red-900 hover:underline block truncate">{idea.name}</Link>
-                    <div className="text-sm text-gray-600 truncate mt-0.5">
-                      {idea.seo_breadcrumbs?.map((crumb: string | { name: string }) => typeof crumb === 'string' ? crumb : crumb.name).join(' > ') || '-'}
+          ideas.map((idea) => {
+            const klpCount = idea.klp_pivots?.length || 0;
+            const relCount = idea.related_interests?.length || 0;
+            const histCount = idea.history_count ?? 0;
+            return (
+              <div key={idea.id} className="bg-white rounded-lg border border-gray-200 p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <input type="checkbox" checked={selectedIds.has(idea.id)} onChange={() => toggleSelect(idea.id)} className="rounded border-gray-300 mt-1" />
+                    <div className="min-w-0">
+                      <Link href={`/interests/${idea.id}`} className="font-medium text-red-700 hover:text-red-900 hover:underline block truncate">{idea.name}</Link>
+                      <div className="text-sm text-gray-600 truncate mt-0.5">
+                        {idea.seo_breadcrumbs?.map((crumb: string | { name: string }) => typeof crumb === 'string' ? crumb : crumb.name).join(' > ') || '-'}
+                      </div>
                     </div>
                   </div>
+                  <div className="text-right shrink-0">
+                  <span className="font-bold text-red-700 whitespace-nowrap text-lg">{formatCompactNumber(idea.searches)}</span>
+                  {idea.prev_searches != null && (() => {
+                    const diff = idea.searches - idea.prev_searches!;
+                    if (diff === 0) return null;
+                    return (
+                      <span className={`block text-xs font-medium ${diff > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {diff > 0 ? '+' : ''}{formatCompactNumber(diff)}
+                      </span>
+                    );
+                  })()}
                 </div>
-                <span className="font-bold text-red-700 whitespace-nowrap text-lg">{formatNumber(idea.searches)}</span>
-              </div>
-              <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
-                <span className="text-xs text-gray-500">{formatDateShort(idea.last_scrape)}</span>
-                <div className="flex gap-1">
-                  <Link href={`/interests/${idea.id}`} className="p-1.5 text-gray-400 hover:text-red-700 rounded" title="Details"><Eye className="w-4 h-4" /></Link>
-                  <a href={idea.url || '#'} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-red-700 rounded" title="Pinterest"><ExternalLink className="w-4 h-4" /></a>
-                  <button onClick={() => handleDelete(idea.id)} className="p-1.5 text-gray-400 hover:text-red-700 rounded" title="Löschen"><Trash2 className="w-4 h-4" /></button>
+                </div>
+                <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+                  {histCount > 0 && <span>Hist: {histCount}</span>}
+                  {klpCount > 0 && <span>KLP: {klpCount}</span>}
+                  {relCount > 0 && <span>Rel: {relCount}</span>}
+                </div>
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
+                  <div className="text-xs text-gray-500 space-x-3">
+                    <span>Upd: {idea.last_update ? formatDateShort(idea.last_update) : '-'}</span>
+                    <span>Scr: {formatDateShort(idea.last_scrape)}</span>
+                  </div>
+                  <div className="flex gap-1">
+                    <Link href={`/interests/${idea.id}`} className="p-1.5 text-gray-400 hover:text-red-700 rounded" title="Details"><Eye className="w-4 h-4" /></Link>
+                    <a href={idea.url || '#'} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-red-700 rounded" title="Pinterest"><ExternalLink className="w-4 h-4" /></a>
+                    <button onClick={() => handleDelete(idea.id)} className="p-1.5 text-gray-400 hover:text-red-700 rounded" title="Löschen"><Trash2 className="w-4 h-4" /></button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
         {totalPages > 1 && (
           <div className="flex items-center justify-between py-3">

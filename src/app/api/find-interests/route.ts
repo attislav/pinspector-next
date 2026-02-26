@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { getSupabase } from '@/lib/db';
 import { searchGoogle } from '@/lib/search';
 import { isValidPinterestIdeasUrl } from '@/lib/pinterest-scraper';
 import { getLanguageConfig } from '@/lib/language-config';
@@ -94,13 +94,13 @@ export async function POST(request: NextRequest) {
 
     // Check for existing URLs in database
     const allUrls = found.map(f => f.url);
-    const placeholders = allUrls.map((_, i) => `$${i + 1}`).join(', ');
-    const existingIdeas = await query<{ url: string | null }>(
-      `SELECT url FROM public.ideas WHERE url IN (${placeholders})`,
-      allUrls
-    );
+    const supabase = getSupabase();
+    const { data: existingIdeas } = await supabase
+      .from('ideas')
+      .select('url')
+      .in('url', allUrls);
 
-    const existingUrls = new Set(existingIdeas.map(i => i.url));
+    const existingUrls = new Set((existingIdeas || []).map(i => i.url));
     const duplicates = allUrls.filter(url => existingUrls.has(url));
     const newItems = found.filter(f => !existingUrls.has(f.url));
 

@@ -1,16 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryOne } from '@/lib/db';
+import { getSupabase } from '@/lib/db';
 import { scrapePinterestIdea } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb } from '@/lib/idea-persistence';
 import { getLanguageConfig, detectLanguageFromUrl } from '@/lib/language-config';
 
 export const maxDuration = 30;
-
-interface DbIdea {
-  id: string;
-  name: string;
-  url: string | null;
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,13 +39,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Search by name in database first (case-insensitive)
-    const existingIdea = await queryOne<DbIdea>(
-      `SELECT id, name, url FROM public.ideas
-       WHERE LOWER(name) = LOWER($1)
-       LIMIT 1`,
-      [name]
-    );
+    const supabase = getSupabase();
+
+    // Search by name in database first (exact case-insensitive match)
+    const { data: existingIdea } = await supabase
+      .from('ideas')
+      .select('id, name, url')
+      .ilike('name', name)
+      .limit(1)
+      .single();
 
     if (existingIdea) {
       return NextResponse.json({
@@ -62,13 +58,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Try partial match
-    const partialMatch = await queryOne<DbIdea>(
-      `SELECT id, name, url FROM public.ideas
-       WHERE LOWER(name) LIKE LOWER($1)
-       ORDER BY searches DESC
-       LIMIT 1`,
-      [`%${name}%`]
-    );
+    const { data: partialMatch } = await supabase
+      .from('ideas')
+      .select('id, name, url')
+      .ilike('name', `%${name}%`)
+      .order('searches', { ascending: false })
+      .limit(1)
+      .single();
 
     if (partialMatch) {
       return NextResponse.json({

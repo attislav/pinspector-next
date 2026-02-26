@@ -1,38 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query, queryOne } from '@/lib/db';
-import { PaginatedResponse, Idea } from '@/types/database';
-
-interface DbIdea {
-  id: string;
-  name: string;
-  url: string | null;
-  searches: number;
-  last_update: Date | null;
-  last_scrape: Date | null;
-  created_at: Date | null;
-  related_interests: string | null;
-  top_annotations: string | null;
-  seo_breadcrumbs: string | null;
-  klp_pivots: string | null;
-  language: string | null;
-}
-
-function mapDbIdea(row: DbIdea): Idea {
-  return {
-    id: row.id,
-    name: row.name,
-    url: row.url,
-    searches: row.searches || 0,
-    last_update: row.last_update?.toISOString() || null,
-    last_scrape: row.last_scrape?.toISOString() || new Date().toISOString(),
-    related_interests: row.related_interests ? JSON.parse(row.related_interests) : [],
-    top_annotations: row.top_annotations,
-    seo_breadcrumbs: row.seo_breadcrumbs ? JSON.parse(row.seo_breadcrumbs) : [],
-    klp_pivots: row.klp_pivots ? JSON.parse(row.klp_pivots) : [],
-    language: row.language || null,
-    created_at: row.created_at?.toISOString() || row.last_scrape?.toISOString() || new Date().toISOString(),
-  };
-}
+import { getSupabase } from '@/lib/db';
+import { PaginatedResponse, Idea, FilteredIdea } from '@/types/database';
 
 export async function GET(request: NextRequest) {
   try {
@@ -48,94 +16,41 @@ export async function GET(request: NextRequest) {
     const maxWords = searchParams.get('maxWords');
     const mainCategory = searchParams.get('mainCategory');
     const subCategory = searchParams.get('subCategory');
+    const language = searchParams.get('language');
 
-    // Build query
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-    let paramIndex = 1;
-
-    if (search) {
-      conditions.push(`name ILIKE $${paramIndex}`);
-      params.push(`%${search}%`);
-      paramIndex++;
-    }
-
-    if (minSearches) {
-      conditions.push(`searches >= $${paramIndex}`);
-      params.push(parseInt(minSearches));
-      paramIndex++;
-    }
-
-    if (maxSearches) {
-      conditions.push(`searches <= $${paramIndex}`);
-      params.push(parseInt(maxSearches));
-      paramIndex++;
-    }
-
-    // Filter by word count (count spaces + 1 for words)
-    if (minWords) {
-      conditions.push(`(array_length(string_to_array(name, ' '), 1)) >= $${paramIndex}`);
-      params.push(parseInt(minWords));
-      paramIndex++;
-    }
-
-    if (maxWords) {
-      conditions.push(`(array_length(string_to_array(name, ' '), 1)) <= $${paramIndex}`);
-      params.push(parseInt(maxWords));
-      paramIndex++;
-    }
-
-    // Filter by main category (first element in seo_breadcrumbs JSON array)
-    if (mainCategory) {
-      conditions.push(`(
-        seo_breadcrumbs IS NOT NULL AND (
-          seo_breadcrumbs::jsonb->0->>'name' = $${paramIndex} OR
-          seo_breadcrumbs::jsonb->>0 = $${paramIndex}
-        )
-      )`);
-      params.push(mainCategory);
-      paramIndex++;
-    }
-
-    // Filter by sub category (second element in seo_breadcrumbs JSON array)
-    if (subCategory) {
-      conditions.push(`(
-        seo_breadcrumbs IS NOT NULL AND (
-          seo_breadcrumbs::jsonb->1->>'name' = $${paramIndex} OR
-          seo_breadcrumbs::jsonb->>1 = $${paramIndex}
-        )
-      )`);
-      params.push(subCategory);
-      paramIndex++;
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    // Validate sortBy to prevent SQL injection
-    const validSortColumns = ['name', 'searches', 'last_scrape', 'last_update'];
+    // Validate sortBy to prevent injection
+    const validSortColumns = ['name', 'searches', 'last_scrape', 'last_update', 'search_diff'];
     const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'last_scrape';
-    const safeSortOrder = sortOrder === 'asc' ? 'ASC' : 'DESC';
+    const safeSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
 
-    // Get total count
-    const countResult = await queryOne<{ count: string }>(
-      `SELECT COUNT(*) as count FROM public.ideas ${whereClause}`,
-      params
-    );
-    const total = parseInt(countResult?.count || '0');
-
-    // Get paginated data
     const offset = (page - 1) * pageSize;
-    const dataParams = [...params, pageSize, offset];
 
-    const data = await query<DbIdea>(
-      `SELECT * FROM public.ideas ${whereClause}
-       ORDER BY ${safeSortBy} ${safeSortOrder} NULLS LAST
-       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-      dataParams
-    );
+    const supabase = getSupabase();
+    const { data, error } = await supabase.rpc('get_filtered_ideas', {
+      p_search: search || null,
+      p_min_searches: minSearches ? parseInt(minSearches) : null,
+      p_max_searches: maxSearches ? parseInt(maxSearches) : null,
+      p_min_words: minWords ? parseInt(minWords) : null,
+      p_max_words: maxWords ? parseInt(maxWords) : null,
+      p_main_category: mainCategory || null,
+      p_sub_category: subCategory || null,
+      p_sort_by: safeSortBy,
+      p_sort_order: safeSortOrder,
+      p_limit: pageSize,
+      p_offset: offset,
+      p_language: language || null,
+    });
 
-    const response: PaginatedResponse<Idea> = {
-      data: data.map(mapDbIdea),
+    if (error) throw error;
+
+    const rows = (data || []) as FilteredIdea[];
+    const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
+
+    // Remove total_count, keep history_count
+    const ideas = rows.map(({ total_count: _, ...rest }) => rest);
+
+    const response: PaginatedResponse<Idea & { history_count?: number; prev_searches?: number | null }> = {
+      data: ideas,
       total,
       page,
       pageSize,
@@ -163,20 +78,15 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Create placeholders for parameterized query
-    const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
+    const supabase = getSupabase();
 
-    // Delete history entries first (foreign key constraint)
-    await query(
-      `DELETE FROM public.idea_history WHERE idea_id IN (${placeholders})`,
-      ids
-    );
+    // Delete ideas (CASCADE handles idea_history and idea_pins)
+    const { error } = await supabase
+      .from('ideas')
+      .delete()
+      .in('id', ids);
 
-    // Delete ideas
-    await query(
-      `DELETE FROM public.ideas WHERE id IN (${placeholders})`,
-      ids
-    );
+    if (error) throw error;
 
     return NextResponse.json({ success: true, deleted: ids.length });
   } catch (error) {

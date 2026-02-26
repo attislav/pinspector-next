@@ -1,14 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-
-interface DbIdea {
-  id: string;
-  name: string;
-  url: string | null;
-  searches: number;
-  related_interests: string | null;
-  top_annotations: string | null;
-}
+import { getSupabase } from '@/lib/db';
+import { Idea } from '@/types/database';
 
 // German umlaut replacements for CSV
 function fixUmlauts(text: string): string {
@@ -44,44 +36,44 @@ export async function POST(request: NextRequest) {
   try {
     const { ids, filters } = await request.json();
 
-    let ideas: DbIdea[];
+    const supabase = getSupabase();
+    let ideas: Idea[];
 
     // If specific IDs provided, filter by them
     if (ids && Array.isArray(ids) && ids.length > 0) {
-      const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
-      ideas = await query<DbIdea>(
-        `SELECT * FROM public.ideas WHERE id IN (${placeholders}) ORDER BY name ASC`,
-        ids
-      );
+      const { data, error } = await supabase
+        .from('ideas')
+        .select('*')
+        .in('id', ids)
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      ideas = data || [];
     } else if (filters) {
       // Build query with filters
-      const conditions: string[] = [];
-      const params: unknown[] = [];
-      let paramIndex = 1;
+      let query = supabase.from('ideas').select('*');
 
       if (filters.search) {
-        conditions.push(`name ILIKE $${paramIndex}`);
-        params.push(`%${filters.search}%`);
-        paramIndex++;
+        query = query.ilike('name', `%${filters.search}%`);
       }
       if (filters.minSearches) {
-        conditions.push(`searches >= $${paramIndex}`);
-        params.push(parseInt(filters.minSearches));
-        paramIndex++;
+        query = query.gte('searches', parseInt(filters.minSearches));
       }
       if (filters.maxSearches) {
-        conditions.push(`searches <= $${paramIndex}`);
-        params.push(parseInt(filters.maxSearches));
-        paramIndex++;
+        query = query.lte('searches', parseInt(filters.maxSearches));
       }
 
-      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-      ideas = await query<DbIdea>(
-        `SELECT * FROM public.ideas ${whereClause} ORDER BY name ASC`,
-        params
-      );
+      const { data, error } = await query.order('name', { ascending: true });
+      if (error) throw error;
+      ideas = data || [];
     } else {
-      ideas = await query<DbIdea>('SELECT * FROM public.ideas ORDER BY name ASC');
+      const { data, error } = await supabase
+        .from('ideas')
+        .select('*')
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      ideas = data || [];
     }
 
     if (!ideas || ideas.length === 0) {
@@ -104,13 +96,10 @@ export async function POST(request: NextRequest) {
 
       let relatedInterests = '';
       if (idea.related_interests) {
-        try {
-          const parsed = JSON.parse(idea.related_interests);
-          if (Array.isArray(parsed)) {
-            relatedInterests = parsed.map((ri: { name: string }) => ri.name).join(', ');
-          }
-        } catch {
-          relatedInterests = '';
+        // Supabase returns JSONB as parsed objects, no JSON.parse needed
+        const parsed = idea.related_interests;
+        if (Array.isArray(parsed)) {
+          relatedInterests = parsed.map((ri: { name: string }) => ri.name).join(', ');
         }
       }
 

@@ -154,8 +154,9 @@ export interface InterestFilters {
   maxWords?: number;
   minSearches?: number;
   maxSearches?: number;
-  sortBy?: 'name' | 'searches' | 'last_scrape';
+  sortBy?: 'name' | 'searches' | 'last_scrape' | 'last_update' | 'search_diff';
   sortOrder?: 'asc' | 'desc';
+  language?: string;
 }
 
 // Categories response from API
@@ -164,30 +165,15 @@ export interface CategoriesResponse {
   subCategories: Record<string, string[]>;
 }
 
-// Database types for Supabase client
-export type Database = {
-  public: {
-    Tables: {
-      ideas: {
-        Row: Idea;
-        Insert: Omit<Idea, 'created_at'> & { created_at?: string };
-        Update: Partial<Idea>;
-      };
-      idea_history: {
-        Row: IdeaHistory;
-        Insert: Omit<IdeaHistory, 'id'> & { id?: number };
-        Update: Partial<IdeaHistory>;
-      };
-      pins: {
-        Row: Pin;
-        Insert: Omit<Pin, 'created_at' | 'last_scrape'> & { created_at?: string; last_scrape?: string };
-        Update: Partial<Pin>;
-      };
-      idea_pins: {
-        Row: IdeaPin;
-        Insert: Omit<IdeaPin, 'added_at'> & { added_at?: string };
-        Update: Partial<IdeaPin>;
-      };
-    };
-  };
-};
+// RPC function return types
+export interface FilteredIdea extends Idea {
+  total_count: number;
+  history_count: number;
+  prev_searches: number | null;
+}
+
+export interface PinWithIdeas extends Pin {
+  idea_ids: string[] | null;
+  idea_names: string[] | null;
+  total_count: number;
+}

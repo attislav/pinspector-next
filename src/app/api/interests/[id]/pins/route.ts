@@ -1,21 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-
-interface DbPin {
-  id: string;
-  title: string | null;
-  description: string | null;
-  image_url: string | null;
-  image_thumbnail_url: string | null;
-  link: string | null;
-  article_url: string | null;
-  repin_count: number;
-  save_count: number;
-  comment_count: number;
-  annotations: string[] | null;
-  pin_created_at: Date | null;
-  position: number;
-}
+import { getSupabase } from '@/lib/db';
 
 export async function GET(
   request: NextRequest,
@@ -24,23 +8,22 @@ export async function GET(
   try {
     const { id } = await params;
 
-    // Get pins for this idea with their positions, ordered by position
-    const pins = await query<DbPin>(
-      `SELECT p.*, ip.position
-       FROM public.pins p
-       JOIN public.idea_pins ip ON p.id = ip.pin_id
-       WHERE ip.idea_id = $1
-       ORDER BY ip.position ASC`,
-      [id]
-    );
+    const supabase = getSupabase();
+    const { data: ideaPins, error } = await supabase
+      .from('idea_pins')
+      .select('position, pins(*)')
+      .eq('idea_id', id)
+      .order('position', { ascending: true });
 
-    // Transform dates to ISO strings
-    const result = pins.map(pin => ({
-      ...pin,
-      pin_created_at: pin.pin_created_at?.toISOString() || null,
+    if (error) throw error;
+
+    // Flatten: ideaPins[i].pins contains the pin data
+    const pins = (ideaPins || []).map(ip => ({
+      ...(ip.pins as unknown as Record<string, unknown>),
+      position: ip.position,
     }));
 
-    return NextResponse.json({ pins: result });
+    return NextResponse.json({ pins });
   } catch (error) {
     console.error('Pins API error:', error);
     return NextResponse.json(
