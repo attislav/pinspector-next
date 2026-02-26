@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, CheckCircle, XCircle, Clock, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { RefreshCw, CheckCircle, XCircle, Clock, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import Link from 'next/link';
 
 interface SyncLogEntry {
@@ -20,6 +20,7 @@ interface SyncLogEntry {
   existing_updated: number;
   failed: number;
   error: string | null;
+  debug_log: string | null;
 }
 
 function formatDuration(started: string, completed: string | null): string {
@@ -62,6 +63,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function SyncLogPage() {
   const [logs, setLogs] = useState<SyncLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedLog, setExpandedLog] = useState<number | null>(null);
 
   const fetchLogs = useCallback(async () => {
     try {
@@ -152,55 +154,84 @@ export default function SyncLogPage() {
               </thead>
               <tbody>
                 {logs.map((log) => (
-                  <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-2.5 px-4 text-xs text-gray-500">{formatDateTime(log.started_at)}</td>
-                    <td className="py-2.5 px-4">
-                      {log.idea_id ? (
-                        <Link href={`/interests/${log.idea_id}`} className="text-sm text-red-700 hover:text-red-900 hover:underline flex items-center gap-1">
-                          {log.idea_name || log.idea_id}
-                          <ExternalLink className="w-3 h-3" />
-                        </Link>
-                      ) : (
-                        <span className="text-sm text-gray-400">-</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-4 text-sm text-right text-gray-700">
-                      {log.idea_searches ? log.idea_searches.toLocaleString('de-DE') : '-'}
-                    </td>
-                    <td className="py-2.5 px-4 text-sm text-right text-gray-500">
-                      {log.score ? log.score.toFixed(1) : '-'}
-                    </td>
-                    <td className="py-2.5 px-4 text-sm text-right text-gray-700">
-                      {log.annotations_scraped}/{log.annotations_total}
-                    </td>
-                    <td className="py-2.5 px-4 text-sm text-right">
-                      {log.new_created > 0 ? (
-                        <span className="text-green-600 font-medium">+{log.new_created}</span>
-                      ) : (
-                        <span className="text-gray-400">0</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-4 text-sm text-right">
-                      {log.existing_updated > 0 ? (
-                        <span className="text-blue-600">{log.existing_updated}</span>
-                      ) : (
-                        <span className="text-gray-400">0</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-4 text-sm text-right">
-                      {log.failed > 0 ? (
-                        <span className="text-red-600">{log.failed}</span>
-                      ) : (
-                        <span className="text-gray-400">0</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-4 text-center">
-                      <StatusBadge status={log.status} />
-                    </td>
-                    <td className="py-2.5 px-4 text-xs text-right text-gray-500">
-                      {formatDuration(log.started_at, log.completed_at)}
-                    </td>
-                  </tr>
+                  <React.Fragment key={log.id}>
+                    <tr className={`border-b border-gray-100 hover:bg-gray-50 ${(log.debug_log || log.error) ? 'cursor-pointer' : ''}`}
+                      onClick={() => (log.debug_log || log.error) && setExpandedLog(expandedLog === log.id ? null : log.id)}>
+                      <td className="py-2.5 px-4 text-xs text-gray-500">
+                        <div className="flex items-center gap-1">
+                          {(log.debug_log || log.error) && (
+                            expandedLog === log.id
+                              ? <ChevronUp className="w-3 h-3 text-gray-400" />
+                              : <ChevronDown className="w-3 h-3 text-gray-400" />
+                          )}
+                          {formatDateTime(log.started_at)}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-4">
+                        {log.idea_id ? (
+                          <Link href={`/interests/${log.idea_id}`} className="text-sm text-red-700 hover:text-red-900 hover:underline flex items-center gap-1"
+                            onClick={(e) => e.stopPropagation()}>
+                            {log.idea_name || log.idea_id}
+                            <ExternalLink className="w-3 h-3" />
+                          </Link>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-4 text-sm text-right text-gray-700">
+                        {log.idea_searches ? log.idea_searches.toLocaleString('de-DE') : '-'}
+                      </td>
+                      <td className="py-2.5 px-4 text-sm text-right text-gray-500">
+                        {log.score ? log.score.toFixed(1) : '-'}
+                      </td>
+                      <td className="py-2.5 px-4 text-sm text-right text-gray-700">
+                        {log.annotations_scraped}/{log.annotations_total}
+                      </td>
+                      <td className="py-2.5 px-4 text-sm text-right">
+                        {log.new_created > 0 ? (
+                          <span className="text-green-600 font-medium">+{log.new_created}</span>
+                        ) : (
+                          <span className="text-gray-400">0</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-4 text-sm text-right">
+                        {log.existing_updated > 0 ? (
+                          <span className="text-blue-600">{log.existing_updated}</span>
+                        ) : (
+                          <span className="text-gray-400">0</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-4 text-sm text-right">
+                        {log.failed > 0 ? (
+                          <span className="text-red-600">{log.failed}</span>
+                        ) : (
+                          <span className="text-gray-400">0</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-4 text-center">
+                        <StatusBadge status={log.status} />
+                      </td>
+                      <td className="py-2.5 px-4 text-xs text-right text-gray-500">
+                        {formatDuration(log.started_at, log.completed_at)}
+                      </td>
+                    </tr>
+                    {expandedLog === log.id && (log.debug_log || log.error) && (
+                      <tr className="bg-gray-50">
+                        <td colSpan={10} className="px-4 py-3">
+                          {log.error && (
+                            <div className="mb-2 text-xs text-red-600 bg-red-50 p-2 rounded font-medium">
+                              Error: {log.error}
+                            </div>
+                          )}
+                          {log.debug_log && (
+                            <pre className="text-xs text-gray-600 bg-gray-100 p-3 rounded font-mono whitespace-pre-wrap max-h-64 overflow-y-auto">
+                              {log.debug_log}
+                            </pre>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -232,8 +263,26 @@ export default function SyncLogPage() {
                   {log.existing_updated > 0 && <span className="text-blue-600">{log.existing_updated} upd</span>}
                   {log.failed > 0 && <span className="text-red-600">{log.failed} fail</span>}
                 </div>
-                {log.error && (
-                  <p className="mt-2 text-xs text-red-600 bg-red-50 p-2 rounded">{log.error}</p>
+                {(log.error || log.debug_log) && (
+                  <button
+                    onClick={() => setExpandedLog(expandedLog === log.id ? null : log.id)}
+                    className="mt-2 text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+                  >
+                    {expandedLog === log.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    Debug Log
+                  </button>
+                )}
+                {expandedLog === log.id && (
+                  <div className="mt-2">
+                    {log.error && (
+                      <p className="text-xs text-red-600 bg-red-50 p-2 rounded mb-2">{log.error}</p>
+                    )}
+                    {log.debug_log && (
+                      <pre className="text-xs text-gray-600 bg-gray-100 p-2 rounded font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">
+                        {log.debug_log}
+                      </pre>
+                    )}
+                  </div>
                 )}
               </div>
             ))}

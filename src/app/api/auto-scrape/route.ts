@@ -19,12 +19,24 @@ interface AutoScrapeCandidate {
   score: number;
 }
 
+interface AnnotationItem {
+  name: string;
+  url: string;
+  hasUrl: boolean;
+  source: string;
+}
+
+interface ScrapeOptions {
+  newKw: boolean;
+  kwOnly: string | null;
+  kwExclude: string | null;
+}
+
 function isOutdatedKeyword(name: string): boolean {
   const currentYear = new Date().getFullYear();
   const yearMatch = name.match(/\b(20\d{2})\b/);
   if (!yearMatch) return false;
   const year = parseInt(yearMatch[1]);
-  // Allow current year and next year, filter everything older
   return year < currentYear;
 }
 
@@ -33,27 +45,38 @@ async function updateLog(logId: number, data: Record<string, unknown>) {
   await supabase.from('sync_log').update(data).eq('id', logId);
 }
 
-async function scrapeAnnotations(
+async function appendDebugLog(logId: number, line: string) {
+  const supabase = getSupabase();
+  const timestamp = new Date().toISOString().slice(11, 19);
+  const { data } = await supabase.from('sync_log').select('debug_log').eq('id', logId).single();
+  const existing = data?.debug_log || '';
+  const updated = existing + `[${timestamp}] ${line}\n`;
+  await supabase.from('sync_log').update({ debug_log: updated }).eq('id', logId);
+}
+
+function collectAnnotations(
   idea: Idea,
   pins: Pin[],
-  langConfig: ReturnType<typeof getLanguageConfig>,
-  maxAnnotations: number,
-  logId: number,
-) {
-  const supabase = getSupabase();
-  const stats = { total: 0, scraped: 0, newCreated: 0, existingUpdated: 0, failed: 0 };
-
-  // Collect all unique items from all sources, deduplicated by name
+  options: ScrapeOptions,
+): AnnotationItem[] {
   const seen = new Set<string>();
-  const withUrl: { name: string; url: string }[] = [];
-  const withoutUrl: string[] = [];
+  const withUrl: AnnotationItem[] = [];
+  const withoutUrl: AnnotationItem[] = [];
+
+  const shouldInclude = (name: string): boolean => {
+    if (seen.has(name.toLowerCase())) return false;
+    if (isOutdatedKeyword(name)) return false;
+    if (options.kwOnly && !name.toLowerCase().includes(options.kwOnly.toLowerCase())) return false;
+    if (options.kwExclude && name.toLowerCase().includes(options.kwExclude.toLowerCase())) return false;
+    return true;
+  };
 
   // KLP Pivots
   if (idea.klp_pivots) {
     for (const pivot of idea.klp_pivots) {
-      if (pivot.url && !seen.has(pivot.name.toLowerCase()) && !isOutdatedKeyword(pivot.name)) {
+      if (pivot.url && shouldInclude(pivot.name)) {
         seen.add(pivot.name.toLowerCase());
-        withUrl.push({ name: pivot.name, url: pivot.url });
+        withUrl.push({ name: pivot.name, url: pivot.url, hasUrl: true, source: 'klp_pivot' });
       }
     }
   }
@@ -61,9 +84,9 @@ async function scrapeAnnotations(
   // Related Interests
   if (idea.related_interests) {
     for (const interest of idea.related_interests) {
-      if (interest.url && !seen.has(interest.name.toLowerCase()) && !isOutdatedKeyword(interest.name)) {
+      if (interest.url && shouldInclude(interest.name)) {
         seen.add(interest.name.toLowerCase());
-        withUrl.push({ name: interest.name, url: interest.url });
+        withUrl.push({ name: interest.name, url: interest.url, hasUrl: true, source: 'related' });
       }
     }
   }
@@ -75,12 +98,12 @@ async function scrapeAnnotations(
     while ((match = regex.exec(idea.top_annotations)) !== null) {
       const url = match[1];
       const name = match[2];
-      if (!seen.has(name.toLowerCase()) && !isOutdatedKeyword(name)) {
+      if (shouldInclude(name)) {
         seen.add(name.toLowerCase());
         if (url && url.includes('/ideas/')) {
-          withUrl.push({ name, url: url.startsWith('http') ? url : `https://www.pinterest.com${url}` });
+          withUrl.push({ name, url: url.startsWith('http') ? url : `https://www.pinterest.com${url}`, hasUrl: true, source: 'top_annotation' });
         } else {
-          withoutUrl.push(name);
+          withoutUrl.push({ name, url: '', hasUrl: false, source: 'top_annotation' });
         }
       }
     }
@@ -90,25 +113,23 @@ async function scrapeAnnotations(
   for (const pin of pins) {
     if (pin.annotations) {
       for (const annotation of pin.annotations) {
-        if (!seen.has(annotation.toLowerCase()) && !isOutdatedKeyword(annotation)) {
+        if (shouldInclude(annotation)) {
           seen.add(annotation.toLowerCase());
-          withoutUrl.push(annotation);
+          withoutUrl.push({ name: annotation, url: '', hasUrl: false, source: 'pin_annotation' });
         }
       }
     }
   }
 
-  const allItems = [
-    ...withUrl.map(item => ({ ...item, hasUrl: true as const })),
-    ...withoutUrl.map(name => ({ name, url: '', hasUrl: false as const })),
-  ];
+  return [...withUrl, ...withoutUrl];
+}
 
-  stats.total = allItems.length;
+async function prioritizeByExistence(items: AnnotationItem[]): Promise<{ sorted: AnnotationItem[]; missingCount: number; existingCount: number }> {
+  const supabase = getSupabase();
 
-  // Check which items already exist in DB — prioritize missing ones
-  const allNames = allItems.map(item => item.name);
+  const allNames = items.map(item => item.name);
   const allIds: string[] = [];
-  for (const item of allItems) {
+  for (const item of items) {
     if (item.hasUrl && item.url) {
       const idMatch = item.url.match(/\/ideas\/[^/]+\/(\d+)/);
       if (idMatch) allIds.push(idMatch[1]);
@@ -124,7 +145,6 @@ async function scrapeAnnotations(
   }
 
   if (allNames.length > 0) {
-    // Check in batches of 50
     for (let i = 0; i < allNames.length; i += 50) {
       const batch = allNames.slice(i, i + 50);
       const orFilter = batch.map(n => `name.ilike.${n}`).join(',');
@@ -133,7 +153,7 @@ async function scrapeAnnotations(
     }
   }
 
-  const isMissing = (item: typeof allItems[0]) => {
+  const isMissing = (item: AnnotationItem) => {
     if (item.hasUrl && item.url) {
       const idMatch = item.url.match(/\/ideas\/[^/]+\/(\d+)/);
       if (idMatch && existingIdSet.has(idMatch[1])) return false;
@@ -142,12 +162,39 @@ async function scrapeAnnotations(
     return true;
   };
 
-  // Sort: missing items first, then existing
-  const missing = allItems.filter(isMissing);
-  const existing = allItems.filter(item => !isMissing(item));
-  const sorted = [...missing, ...existing];
+  const missing = items.filter(isMissing);
+  const existing = items.filter(item => !isMissing(item));
 
-  const toScrape = sorted.slice(0, maxAnnotations);
+  return { sorted: [...missing, ...existing], missingCount: missing.length, existingCount: existing.length };
+}
+
+async function scrapeAnnotations(
+  idea: Idea,
+  pins: Pin[],
+  langConfig: ReturnType<typeof getLanguageConfig>,
+  maxAnnotations: number,
+  logId: number,
+  options: ScrapeOptions,
+) {
+  const supabase = getSupabase();
+  const stats = { total: 0, scraped: 0, newCreated: 0, existingUpdated: 0, failed: 0, filtered: 0, skippedExisting: 0 };
+
+  const allItems = collectAnnotations(idea, pins, options);
+  stats.total = allItems.length;
+
+  await appendDebugLog(logId, `Collected ${allItems.length} annotations (kwOnly=${options.kwOnly || 'none'}, kwExclude=${options.kwExclude || 'none'})`);
+
+  let toScrape: AnnotationItem[];
+
+  if (options.newKw) {
+    const { sorted, missingCount, existingCount } = await prioritizeByExistence(allItems);
+    await appendDebugLog(logId, `Prioritization: ${missingCount} missing, ${existingCount} existing`);
+    toScrape = sorted.slice(0, maxAnnotations);
+  } else {
+    toScrape = allItems.slice(0, maxAnnotations);
+  }
+
+  await appendDebugLog(logId, `Scraping ${toScrape.length} of ${allItems.length} annotations`);
 
   for (const item of toScrape) {
     try {
@@ -165,6 +212,7 @@ async function scrapeAnnotations(
           result = sr;
         } else {
           stats.failed++;
+          await appendDebugLog(logId, `FAIL [${item.source}] "${item.name}" - ${resp.error || 'unknown error'}`);
           continue;
         }
       } else {
@@ -201,10 +249,12 @@ async function scrapeAnnotations(
             try { if (resp.pins) await savePinsToDb(resp.idea.id, resp.pins); } catch { /* non-critical */ }
           } else {
             stats.failed++;
+            await appendDebugLog(logId, `FAIL [${item.source}] "${item.name}" (slug: ${slug}) - ${resp.error || 'unknown error'}`);
             continue;
           }
-        } catch {
+        } catch (e) {
           stats.failed++;
+          await appendDebugLog(logId, `FAIL [${item.source}] "${item.name}" (slug: ${slug}) - ${e instanceof Error ? e.message : 'exception'}`);
           continue;
         }
       }
@@ -216,10 +266,13 @@ async function scrapeAnnotations(
       }
 
       await new Promise(resolve => setTimeout(resolve, 300));
-    } catch {
+    } catch (e) {
       stats.failed++;
+      await appendDebugLog(logId, `FAIL "${item.name}" - ${e instanceof Error ? e.message : 'exception'}`);
     }
   }
+
+  await appendDebugLog(logId, `Done: ${stats.scraped} scraped, ${stats.newCreated} new, ${stats.existingUpdated} updated, ${stats.failed} failed`);
 
   // Update log with final stats
   await updateLog(logId, {
@@ -249,6 +302,11 @@ export async function POST(request: NextRequest) {
     const maxAnnotations: number = Math.min(body.maxAnnotations || 50, 100);
     const scrapeRelated: boolean = body.scrapeRelated !== false;
     const kw: string | null = body.kw || null;
+    const newKw: boolean = body.newKw === true;
+    const kwOnly: string | null = body.kwOnly || null;
+    const kwExclude: string | null = body.kwExclude || null;
+    const minSearches: number = body.minSearches || 1;
+    const dryRun: boolean = body.dryRun === true;
 
     const supabase = getSupabase();
 
@@ -257,6 +315,7 @@ export async function POST(request: NextRequest) {
       p_language: language,
       p_min_age_days: minAgeDays,
       p_name_contains: kw,
+      p_min_searches: minSearches,
     });
 
     if (rpcError) {
@@ -269,6 +328,91 @@ export async function POST(request: NextRequest) {
         success: true,
         message: 'No candidates found — all ideas are up to date',
         idea: null,
+      });
+    }
+
+    // Dry Run: show what would be scraped without actually doing it
+    if (dryRun) {
+      // Fetch the idea data to preview annotations
+      const { data: ideaData } = await supabase
+        .from('ideas')
+        .select('*')
+        .eq('id', candidate.id)
+        .single();
+
+      const { data: pinsData } = await supabase
+        .from('pins')
+        .select('*')
+        .in('id', (
+          await supabase.from('idea_pins').select('pin_id').eq('idea_id', candidate.id)
+        ).data?.map(r => r.pin_id) || []);
+
+      const options: ScrapeOptions = { newKw, kwOnly, kwExclude };
+      const allItems = collectAnnotations(ideaData as Idea, (pinsData || []) as Pin[], options);
+
+      let preview: { name: string; source: string; hasUrl: boolean; isMissing?: boolean }[];
+
+      if (newKw) {
+        const { sorted, missingCount, existingCount } = await prioritizeByExistence(allItems);
+        preview = sorted.slice(0, maxAnnotations).map(item => ({
+          name: item.name,
+          source: item.source,
+          hasUrl: item.hasUrl,
+        }));
+        // Mark missing/existing
+        const missingItems = sorted.slice(0, missingCount);
+        preview = sorted.slice(0, maxAnnotations).map(item => ({
+          name: item.name,
+          source: item.source,
+          hasUrl: item.hasUrl,
+          isMissing: missingItems.some(m => m.name === item.name),
+        }));
+
+        return NextResponse.json({
+          success: true,
+          dryRun: true,
+          candidate: {
+            id: candidate.id,
+            name: candidate.name,
+            searches: candidate.searches,
+            score: candidate.score,
+            pivot_count: candidate.pivot_count,
+            related_count: candidate.related_count,
+          },
+          annotations: {
+            total: allItems.length,
+            wouldScrape: preview.length,
+            missing: missingCount,
+            existing: existingCount,
+            items: preview,
+          },
+          filters: { kwOnly, kwExclude, newKw, minSearches },
+        });
+      }
+
+      preview = allItems.slice(0, maxAnnotations).map(item => ({
+        name: item.name,
+        source: item.source,
+        hasUrl: item.hasUrl,
+      }));
+
+      return NextResponse.json({
+        success: true,
+        dryRun: true,
+        candidate: {
+          id: candidate.id,
+          name: candidate.name,
+          searches: candidate.searches,
+          score: candidate.score,
+          pivot_count: candidate.pivot_count,
+          related_count: candidate.related_count,
+        },
+        annotations: {
+          total: allItems.length,
+          wouldScrape: preview.length,
+          items: preview,
+        },
+        filters: { kwOnly, kwExclude, newKw, minSearches },
       });
     }
 
@@ -292,10 +436,14 @@ export async function POST(request: NextRequest) {
 
     const logId = logEntry.id;
     const langConfig = getLanguageConfig(language);
+    const scrapeOptions: ScrapeOptions = { newKw, kwOnly, kwExclude };
 
     // Step 3: Respond immediately, scrape in background
     after(async () => {
       try {
+        await appendDebugLog(logId, `Started scraping: ${candidate.name} (${candidate.url})`);
+        await appendDebugLog(logId, `Options: newKw=${newKw}, kwOnly=${kwOnly || 'none'}, kwExclude=${kwExclude || 'none'}, maxAnnotations=${maxAnnotations}`);
+
         // Scrape the main idea
         const scrapeResult = await scrapePinterestIdea(candidate.url, {
           acceptLanguage: langConfig.acceptLanguage,
@@ -304,6 +452,7 @@ export async function POST(request: NextRequest) {
         });
 
         if (!scrapeResult.success || !scrapeResult.idea) {
+          await appendDebugLog(logId, `Main scrape FAILED: ${scrapeResult.error}`);
           await updateLog(logId, {
             status: 'failed',
             error: `Scrape failed: ${scrapeResult.error}`,
@@ -314,6 +463,8 @@ export async function POST(request: NextRequest) {
 
         const idea = scrapeResult.idea;
         const pins = scrapeResult.pins || [];
+
+        await appendDebugLog(logId, `Main scrape OK: "${idea.name}" (${idea.searches} searches, ${pins.length} pins)`);
 
         // Save idea + pins
         await saveIdeaToDb(idea);
@@ -328,8 +479,9 @@ export async function POST(request: NextRequest) {
 
         // Scrape annotations
         if (scrapeRelated) {
-          await scrapeAnnotations(idea, pins, langConfig, maxAnnotations, logId);
+          await scrapeAnnotations(idea, pins, langConfig, maxAnnotations, logId, scrapeOptions);
         } else {
+          await appendDebugLog(logId, 'scrapeRelated=false, skipping annotations');
           await updateLog(logId, {
             status: 'completed',
             completed_at: new Date().toISOString(),
@@ -337,6 +489,7 @@ export async function POST(request: NextRequest) {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
+        await appendDebugLog(logId, `FATAL ERROR: ${message}`);
         await updateLog(logId, {
           status: 'failed',
           error: message,
@@ -357,6 +510,7 @@ export async function POST(request: NextRequest) {
         pivot_count: candidate.pivot_count,
         related_count: candidate.related_count,
       },
+      filters: { newKw, kwOnly, kwExclude, minSearches },
       message: 'Scrape started in background. Check /sync-log for progress.',
     });
   } catch (error) {

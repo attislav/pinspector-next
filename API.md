@@ -809,8 +809,13 @@ curl -X POST "$BASE_URL/api/auto-scrape" \
   -d '{
     "language": "de",
     "kw": "küche",
+    "kwOnly": "deko",
+    "kwExclude": "2024",
+    "newKw": true,
+    "minSearches": 1000,
     "maxAnnotations": 50,
-    "minAgeDays": 30
+    "minAgeDays": 30,
+    "dryRun": false
   }'
 ```
 
@@ -818,9 +823,14 @@ curl -X POST "$BASE_URL/api/auto-scrape" \
 |------|-----|---------|---------|--------------|
 | language | string | nein | "de" | Sprache der Ideas |
 | kw | string | nein | null | Nur Ideas deren Name dieses Keyword enthaelt |
+| kwOnly | string | nein | null | Nur Annotations scrapen, deren Name diesen String enthaelt |
+| kwExclude | string | nein | null | Annotations ueberspringen, deren Name diesen String enthaelt |
+| newKw | boolean | nein | false | `true` = fehlende Annotations zuerst scrapen, bestehende danach |
+| minSearches | number | nein | 1 | Nur Ideas mit mindestens X Suchvolumen als Kandidat |
 | maxAnnotations | number | nein | 50 | Max. Annotations pro Durchlauf (max 100) |
 | minAgeDays | number | nein | 30 | Nur Ideas die aelter als X Tage sind (last_scrape UND last_update) |
 | scrapeRelated | boolean | nein | true | Auch Pivots/Related/Annotations scrapen |
+| dryRun | boolean | nein | false | `true` = Zeigt was gescrapt werden wuerde, ohne tatsaechlich zu scrapen |
 
 **Auth:** Header `x-api-key` muss mit `AUTO_SCRAPE_API_KEY` Env-Variable uebereinstimmen.
 
@@ -837,13 +847,34 @@ curl -X POST "$BASE_URL/api/auto-scrape" \
     "pivot_count": 0,
     "related_count": 4
   },
+  "filters": { "newKw": true, "kwOnly": "deko", "kwExclude": null, "minSearches": 1000 },
   "message": "Scrape started in background. Check /sync-log for progress."
 }
 ```
 
-**Scraping laeuft im Hintergrund** via Next.js `after()`. Fortschritt im Sync-Log unter `/sync-log` einsehbar.
+**Dry-Run Response (dryRun=true):**
+```json
+{
+  "success": true,
+  "dryRun": true,
+  "candidate": { "id": "...", "name": "...", "searches": 12500, "score": 2.4 },
+  "annotations": {
+    "total": 85,
+    "wouldScrape": 50,
+    "missing": 32,
+    "existing": 53,
+    "items": [
+      { "name": "küche deko ideen", "source": "klp_pivot", "hasUrl": true, "isMissing": true },
+      { "name": "moderne küche", "source": "related", "hasUrl": true, "isMissing": false }
+    ]
+  },
+  "filters": { "newKw": true, "kwOnly": "deko", "kwExclude": null, "minSearches": 1000 }
+}
+```
 
-**Score-Berechnung:** `normalized(Alter) + normalized(Pivots+Related) + normalized(Suchvolumen)`. Ideas mit 0 Suchvolumen und veralteten Jahreszahlen (vor aktuellem Jahr) werden ausgeschlossen. Ideas die gerade gescrapt werden (`status='running'` im sync_log) werden uebersprungen -- dadurch koennen 2-3 parallele Requests unterschiedliche Ideas scrapen.
+**Scraping laeuft im Hintergrund** via Next.js `after()`. Fortschritt im Sync-Log unter `/sync-log` einsehbar. Jeder Scrape-Durchlauf schreibt ein **Debug-Log** mit Details zu jedem einzelnen Annotation-Scrape (Erfolg/Fehler, Quelle, Fehlermeldung). Das Debug-Log ist in der Sync-Log Seite per Klick auf eine Zeile aufklappbar.
+
+**Score-Berechnung:** `normalized(Alter) + normalized(Pivots+Related) + normalized(Suchvolumen)`. Ideas mit weniger als `minSearches` Suchvolumen und veralteten Jahreszahlen (vor aktuellem Jahr) werden ausgeschlossen. Ideas die gerade gescrapt werden (`status='running'` im sync_log) werden uebersprungen -- dadurch koennen 2-3 parallele Requests unterschiedliche Ideas scrapen.
 
 **Timeout:** 300 Sekunden (Vercel Hobby max)
 
