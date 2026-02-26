@@ -146,6 +146,7 @@ export default function IdeaDetailPage() {
         onItemClick={detail.scrapeAndNavigate}
         scrapingUrl={detail.scrapingUrl}
         existingIds={detail.existingIds}
+        existingNames={detail.existingNames}
       />
 
       {/* Verwandte Interessen */}
@@ -159,6 +160,7 @@ export default function IdeaDetailPage() {
         onItemClick={detail.scrapeAndNavigate}
         scrapingUrl={detail.scrapingUrl}
         existingIds={detail.existingIds}
+        existingNames={detail.existingNames}
       />
 
       {/* Top Annotations */}

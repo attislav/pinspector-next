@@ -14,6 +14,7 @@ interface KeywordSectionProps {
   onItemClick: (url: string) => void;
   scrapingUrl: string | null;
   existingIds?: Set<string>;
+  existingNames?: Set<string>;
 }
 
 function extractIdFromUrl(url: string): string | null {
@@ -23,13 +24,15 @@ function extractIdFromUrl(url: string): string | null {
 
 export function KeywordSection({
   title, icon: Icon, items, copyId, copied, copyMenuOpen,
-  onCopyToggle, onCopy, onItemClick, scrapingUrl, existingIds,
+  onCopyToggle, onCopy, onItemClick, scrapingUrl, existingIds, existingNames,
 }: KeywordSectionProps) {
   if (!items || items.length === 0) return null;
 
-  const existsCount = existingIds ? items.filter(item => {
+  const existsCount = (existingIds || existingNames) ? items.filter(item => {
     const itemId = item.id || extractIdFromUrl(item.url);
-    return itemId && existingIds.has(itemId);
+    if (itemId && existingIds?.has(itemId)) return true;
+    if (existingNames?.has(item.name.toLowerCase())) return true;
+    return false;
   }).length : 0;
 
   return (
@@ -54,7 +57,7 @@ export function KeywordSection({
       <div className="flex flex-wrap gap-2">
         {items.map((item, index) => {
           const itemId = item.id || extractIdFromUrl(item.url);
-          const exists = itemId && existingIds?.has(itemId);
+          const exists = (itemId && existingIds?.has(itemId)) || existingNames?.has(item.name.toLowerCase());
           return (
             <button
               key={index}

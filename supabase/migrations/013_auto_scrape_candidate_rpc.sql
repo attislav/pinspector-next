@@ -32,6 +32,8 @@ BEGIN
       AND (i.last_scrape IS NULL OR i.last_scrape < NOW() - (p_min_age_days || ' days')::INTERVAL)
       AND (i.last_update IS NULL OR i.last_update < NOW() - (p_min_age_days || ' days')::INTERVAL)
       AND i.url IS NOT NULL
+      AND i.searches > 0
+      AND i.name !~ '\b20(1[0-9]|2[0-4])\b'
   ),
   stats AS (
     SELECT
