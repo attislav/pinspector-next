@@ -5,7 +5,7 @@ import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
 import { getLanguageConfig } from '@/lib/language-config';
 import { Idea, Pin } from '@/types/database';
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 interface AutoScrapeCandidate {
   id: string;
@@ -203,8 +203,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const language: string = body.language || 'de';
     const minAgeDays: number = body.minAgeDays || 30;
-    const maxAnnotations: number = Math.min(body.maxAnnotations || 20, 30);
+    const maxAnnotations: number = Math.min(body.maxAnnotations || 50, 100);
     const scrapeRelated: boolean = body.scrapeRelated !== false;
+    const kw: string | null = body.kw || null;
 
     const supabase = getSupabase();
 
@@ -212,6 +213,7 @@ export async function POST(request: NextRequest) {
     const { data: candidates, error: rpcError } = await supabase.rpc('get_auto_scrape_candidate', {
       p_language: language,
       p_min_age_days: minAgeDays,
+      p_name_contains: kw,
     });
 
     if (rpcError) {
