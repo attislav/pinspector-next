@@ -2,9 +2,9 @@
 
 ## Authentifizierung
 
-**Keine Authentifizierung erforderlich.** Alle Endpoints sind offen zugaenglich -- es gibt keinen API-Token, kein JWT, keine API-Keys. Du brauchst nur die Base-URL deiner laufenden Instanz.
+Die meisten Endpoints sind offen zugaenglich. Der Auto-Scrape Endpoint erfordert einen API-Key.
 
-> **Voraussetzung:** Die App muss laufen (`npm run dev` oder deployed) und die Server-seitigen Env-Variablen (`DATABASE_URL`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `OPENAI_API_KEY`) muessen gesetzt sein. Diese werden intern genutzt, nicht vom Client uebergeben.
+> **Voraussetzung:** Die App muss laufen (`npm run dev` oder deployed) und die Server-seitigen Env-Variablen (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `OPENAI_API_KEY`, `AUTO_SCRAPE_API_KEY`) muessen gesetzt sein. Diese werden intern genutzt, nicht vom Client uebergeben.
 
 ---
 
@@ -403,7 +403,8 @@ curl "$BASE_URL/api/interests?page=1&pageSize=30&search=meal&sortBy=searches&sor
 | page | number | 1 | Seite |
 | pageSize | number | 30 | Ergebnisse pro Seite |
 | search | string | - | Name-Suche (ILIKE) |
-| sortBy | string | last_scrape | name, searches, last_scrape, last_update |
+| sortBy | string | last_scrape | name, searches, last_scrape, last_update, search_diff, history_count, klp_count, related_count |
+| language | string | - | Sprache filtern (de, en, fr, etc.) |
 | sortOrder | string | desc | asc, desc |
 | minSearches | number | - | Minimum Suchvolumen |
 | maxSearches | number | - | Maximum Suchvolumen |
@@ -796,6 +797,130 @@ Sucht via Google nach Pinterest-Ideas-URLs. **Kein DB-Zugriff** -- kein Duplikat
 
 ---
 
+### 22. POST /api/auto-scrape
+
+Automatisierter Scrape-Endpoint fuer n8n/Cron-Jobs. Waehlt die beste Idea per Score (Alter + Expansion + Suchvolumen), scrapt sie inkl. Annotations im Hintergrund. **Erfordert API-Key.**
+
+**Request:**
+```bash
+curl -X POST "$BASE_URL/api/auto-scrape" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: DEIN_API_KEY" \
+  -d '{
+    "language": "de",
+    "kw": "küche",
+    "maxAnnotations": 50,
+    "minAgeDays": 30
+  }'
+```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| language | string | nein | "de" | Sprache der Ideas |
+| kw | string | nein | null | Nur Ideas deren Name dieses Keyword enthaelt |
+| maxAnnotations | number | nein | 50 | Max. Annotations pro Durchlauf (max 100) |
+| minAgeDays | number | nein | 30 | Nur Ideas die aelter als X Tage sind (last_scrape UND last_update) |
+| scrapeRelated | boolean | nein | true | Auch Pivots/Related/Annotations scrapen |
+
+**Auth:** Header `x-api-key` muss mit `AUTO_SCRAPE_API_KEY` Env-Variable uebereinstimmen.
+
+**Response (sofort, <1s):**
+```json
+{
+  "success": true,
+  "logId": 42,
+  "candidate": {
+    "id": "934345010001",
+    "name": "sicht schutz garten ideen",
+    "searches": 12500,
+    "score": 2.4,
+    "pivot_count": 0,
+    "related_count": 4
+  },
+  "message": "Scrape started in background. Check /sync-log for progress."
+}
+```
+
+**Scraping laeuft im Hintergrund** via Next.js `after()`. Fortschritt im Sync-Log unter `/sync-log` einsehbar.
+
+**Score-Berechnung:** `normalized(Alter) + normalized(Pivots+Related) + normalized(Suchvolumen)`. Ideas mit 0 Suchvolumen und veralteten Jahreszahlen (vor aktuellem Jahr) werden ausgeschlossen. Ideas die gerade gescrapt werden (`status='running'` im sync_log) werden uebersprungen -- dadurch koennen 2-3 parallele Requests unterschiedliche Ideas scrapen.
+
+**Timeout:** 300 Sekunden (Vercel Hobby max)
+
+---
+
+### 23. POST /api/interests/check
+
+Batch-Pruefung ob Ideas bereits in der Datenbank existieren. Wird fuer die gruen/rot-Markierung auf der Detail-Seite verwendet.
+
+**Request:**
+```json
+{
+  "ids": ["934345010001", "93975"],
+  "names": ["Sichtschutzwand Garten", "Hecke Sichtschutz"]
+}
+```
+
+| Feld | Typ | Pflicht | Default | Beschreibung |
+|------|-----|---------|---------|--------------|
+| ids | string[] | nein | [] | Idea-IDs zum Pruefen (max 500) |
+| names | string[] | nein | [] | Idea-Namen zum Pruefen, case-insensitive (max 500) |
+
+**Response:**
+```json
+{
+  "ids": ["934345010001"],
+  "names": ["sichtschutzwand garten"]
+}
+```
+
+---
+
+### 24. GET /api/sync-logs
+
+Letzte 50 Auto-Scrape Log-Eintraege.
+
+```bash
+curl "$BASE_URL/api/sync-logs"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "logs": [
+    {
+      "id": 42,
+      "started_at": "2026-02-26T12:00:00Z",
+      "completed_at": "2026-02-26T12:01:45Z",
+      "status": "completed",
+      "idea_id": "934345010001",
+      "idea_name": "sicht schutz garten ideen",
+      "idea_searches": 12500,
+      "language": "de",
+      "score": 2.4,
+      "annotations_total": 45,
+      "annotations_scraped": 50,
+      "new_created": 14,
+      "existing_updated": 6,
+      "failed": 3,
+      "error": null
+    }
+  ]
+}
+```
+
+| Feld | Beschreibung |
+|------|--------------|
+| status | "running", "completed", "failed" |
+| annotations_total | Gesamtzahl deduplizierter Annotations |
+| annotations_scraped | Davon tatsaechlich gescrapt |
+| new_created | Neue Ideas in DB angelegt |
+| existing_updated | Bestehende Ideas aktualisiert |
+| failed | Fehlgeschlagene Scrapes |
+
+---
+
 ## Fehlerbehandlung
 
 Alle Endpoints geben bei Fehlern JSON zurueck:
@@ -807,6 +932,7 @@ Alle Endpoints geben bei Fehlern JSON zurueck:
 | HTTP Status | Bedeutung |
 |-------------|-----------|
 | 400 | Fehlende Pflichtfelder |
+| 401 | Unauthorized (fehlender/falscher API-Key bei /api/auto-scrape) |
 | 404 | Ressource nicht gefunden |
 | 429 | Rate Limit (DataForSEO) |
 | 500 | Server-Fehler |
