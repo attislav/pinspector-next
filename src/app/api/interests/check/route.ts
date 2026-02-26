@@ -28,10 +28,10 @@ export async function POST(request: NextRequest) {
         .from('ideas')
         .select('name');
       if (!error && data) {
-        const nameSet = new Set(uniqueNames.map(n => n.toLowerCase()));
-        for (const row of data) {
-          if (nameSet.has(row.name.toLowerCase())) {
-            foundNames.push(row.name);
+        const dbNames = new Set(data.map(row => row.name.toLowerCase()));
+        for (const name of uniqueNames) {
+          if (dbNames.has(name.toLowerCase())) {
+            foundNames.push(name.toLowerCase());
           }
         }
       }

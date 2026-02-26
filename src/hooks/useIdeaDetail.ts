@@ -69,24 +69,37 @@ export function useIdeaDetail(id: string) {
       }
     }
 
-    // Extract IDs from top_annotations URLs
+    // Extract IDs and names from top_annotations
+    const annotationNames = new Set<string>();
     if (idea.top_annotations) {
       const urlRegex = /href="[^"]*\/ideas\/[^/]+\/(\d+)[^"]*"/g;
       let match;
       while ((match = urlRegex.exec(idea.top_annotations)) !== null) {
         idsToCheck.add(match[1]);
       }
+      // Also collect annotation names for name-based check
+      const nameRegex = /<a[^>]*>([^<]*)<\/a>/g;
+      let nameMatch;
+      while ((nameMatch = nameRegex.exec(idea.top_annotations)) !== null) {
+        annotationNames.add(nameMatch[1]);
+      }
     }
 
-    // Extract IDs from pin annotations - annotations are names, not URLs
-    // We need to check by name instead. Collect unique annotation names.
-    const annotationNames = new Set<string>();
+    // Collect pin annotation names
     for (const pin of pins) {
       if (pin.annotations) {
         for (const a of pin.annotations) {
           annotationNames.add(a);
         }
       }
+    }
+
+    // Also add KLP pivot and related interest names for name-based fallback
+    if (idea.klp_pivots) {
+      for (const p of idea.klp_pivots) annotationNames.add(p.name);
+    }
+    if (idea.related_interests) {
+      for (const ri of idea.related_interests) annotationNames.add(ri.name);
     }
 
     if (idsToCheck.size === 0 && annotationNames.size === 0) return;
