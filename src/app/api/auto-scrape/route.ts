@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabase } from '@/lib/db';
 import { scrapePinterestIdea } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
 import { getLanguageConfig } from '@/lib/language-config';
+import { Idea, Pin } from '@/types/database';
 
 export const maxDuration = 60;
 
@@ -16,6 +17,170 @@ interface AutoScrapeCandidate {
   pivot_count: number;
   related_count: number;
   score: number;
+}
+
+async function updateLog(logId: number, data: Record<string, unknown>) {
+  const supabase = getSupabase();
+  await supabase.from('sync_log').update(data).eq('id', logId);
+}
+
+async function scrapeAnnotations(
+  idea: Idea,
+  pins: Pin[],
+  langConfig: ReturnType<typeof getLanguageConfig>,
+  maxAnnotations: number,
+  logId: number,
+) {
+  const supabase = getSupabase();
+  const stats = { total: 0, scraped: 0, newCreated: 0, existingUpdated: 0, failed: 0 };
+
+  // Collect all unique items from all sources, deduplicated by name
+  const seen = new Set<string>();
+  const withUrl: { name: string; url: string }[] = [];
+  const withoutUrl: string[] = [];
+
+  // KLP Pivots
+  if (idea.klp_pivots) {
+    for (const pivot of idea.klp_pivots) {
+      if (pivot.url && !seen.has(pivot.name.toLowerCase())) {
+        seen.add(pivot.name.toLowerCase());
+        withUrl.push({ name: pivot.name, url: pivot.url });
+      }
+    }
+  }
+
+  // Related Interests
+  if (idea.related_interests) {
+    for (const interest of idea.related_interests) {
+      if (interest.url && !seen.has(interest.name.toLowerCase())) {
+        seen.add(interest.name.toLowerCase());
+        withUrl.push({ name: interest.name, url: interest.url });
+      }
+    }
+  }
+
+  // Top Annotations (extract URLs from href)
+  if (idea.top_annotations) {
+    const regex = /<a\s+href="([^"]*)"[^>]*>([^<]*)<\/a>/g;
+    let match;
+    while ((match = regex.exec(idea.top_annotations)) !== null) {
+      const url = match[1];
+      const name = match[2];
+      if (!seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        if (url && url.includes('/ideas/')) {
+          withUrl.push({ name, url: url.startsWith('http') ? url : `https://www.pinterest.com${url}` });
+        } else {
+          withoutUrl.push(name);
+        }
+      }
+    }
+  }
+
+  // Pin Annotations (names only)
+  for (const pin of pins) {
+    if (pin.annotations) {
+      for (const annotation of pin.annotations) {
+        if (!seen.has(annotation.toLowerCase())) {
+          seen.add(annotation.toLowerCase());
+          withoutUrl.push(annotation);
+        }
+      }
+    }
+  }
+
+  const allItems = [
+    ...withUrl.map(item => ({ ...item, hasUrl: true as const })),
+    ...withoutUrl.map(name => ({ name, url: '', hasUrl: false as const })),
+  ];
+
+  stats.total = allItems.length;
+  const toScrape = allItems.slice(0, maxAnnotations);
+
+  for (const item of toScrape) {
+    try {
+      let result;
+
+      if (item.hasUrl && item.url) {
+        const resp = await scrapePinterestIdea(item.url, {
+          acceptLanguage: langConfig.acceptLanguage,
+          pinterestDomain: langConfig.pinterestDomain,
+          language: langConfig.languageCode,
+        });
+        if (resp.success && resp.idea) {
+          const sr = await saveIdeaToDb(resp.idea);
+          try { if (resp.pins) await savePinsToDb(resp.idea.id, resp.pins); } catch { /* non-critical */ }
+          result = sr;
+        } else {
+          stats.failed++;
+          continue;
+        }
+      } else {
+        // Check DB first
+        const { data: existing } = await supabase
+          .from('ideas')
+          .select('id')
+          .ilike('name', item.name)
+          .limit(1)
+          .single();
+
+        if (existing) {
+          stats.existingUpdated++;
+          stats.scraped++;
+          continue;
+        }
+
+        // Construct Pinterest URL and try to scrape
+        const slug = item.name.toLowerCase()
+          .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss')
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '');
+
+        const tryUrl = `https://${langConfig.pinterestDomain}/ideas/${slug}/`;
+
+        try {
+          const resp = await scrapePinterestIdea(tryUrl, {
+            acceptLanguage: langConfig.acceptLanguage,
+            pinterestDomain: langConfig.pinterestDomain,
+            language: langConfig.languageCode,
+          });
+          if (resp.success && resp.idea) {
+            result = await saveIdeaToDb(resp.idea);
+            try { if (resp.pins) await savePinsToDb(resp.idea.id, resp.pins); } catch { /* non-critical */ }
+          } else {
+            stats.failed++;
+            continue;
+          }
+        } catch {
+          stats.failed++;
+          continue;
+        }
+      }
+
+      if (result) {
+        stats.scraped++;
+        if (result.isNew) stats.newCreated++;
+        else stats.existingUpdated++;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+    } catch {
+      stats.failed++;
+    }
+  }
+
+  // Update log with final stats
+  await updateLog(logId, {
+    annotations_total: stats.total,
+    annotations_scraped: stats.scraped,
+    new_created: stats.newCreated,
+    existing_updated: stats.existingUpdated,
+    failed: stats.failed,
+    status: 'completed',
+    completed_at: new Date().toISOString(),
+  });
+
+  return stats;
 }
 
 export async function POST(request: NextRequest) {
@@ -53,190 +218,92 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Step 2: Scrape the main idea
+    // Step 2: Create log entry
+    const { data: logEntry, error: logError } = await supabase
+      .from('sync_log')
+      .insert({
+        status: 'running',
+        idea_id: candidate.id,
+        idea_name: candidate.name,
+        idea_searches: candidate.searches,
+        language,
+        score: candidate.score,
+      })
+      .select('id')
+      .single();
+
+    if (logError || !logEntry) {
+      return NextResponse.json({ success: false, error: `Log error: ${logError?.message}` }, { status: 500 });
+    }
+
+    const logId = logEntry.id;
     const langConfig = getLanguageConfig(language);
-    const scrapeResult = await scrapePinterestIdea(candidate.url, {
-      acceptLanguage: langConfig.acceptLanguage,
-      pinterestDomain: langConfig.pinterestDomain,
-      language: langConfig.languageCode,
+
+    // Step 3: Respond immediately, scrape in background
+    after(async () => {
+      try {
+        // Scrape the main idea
+        const scrapeResult = await scrapePinterestIdea(candidate.url, {
+          acceptLanguage: langConfig.acceptLanguage,
+          pinterestDomain: langConfig.pinterestDomain,
+          language: langConfig.languageCode,
+        });
+
+        if (!scrapeResult.success || !scrapeResult.idea) {
+          await updateLog(logId, {
+            status: 'failed',
+            error: `Scrape failed: ${scrapeResult.error}`,
+            completed_at: new Date().toISOString(),
+          });
+          return;
+        }
+
+        const idea = scrapeResult.idea;
+        const pins = scrapeResult.pins || [];
+
+        // Save idea + pins
+        await saveIdeaToDb(idea);
+        try { await savePinsToDb(idea.id, pins); } catch { /* non-critical */ }
+
+        // Update log with idea data
+        await updateLog(logId, {
+          idea_id: idea.id,
+          idea_name: idea.name,
+          idea_searches: idea.searches,
+        });
+
+        // Scrape annotations
+        if (scrapeRelated) {
+          await scrapeAnnotations(idea, pins, langConfig, maxAnnotations, logId);
+        } else {
+          await updateLog(logId, {
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+          });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        await updateLog(logId, {
+          status: 'failed',
+          error: message,
+          completed_at: new Date().toISOString(),
+        });
+      }
     });
 
-    if (!scrapeResult.success || !scrapeResult.idea) {
-      return NextResponse.json({
-        success: false,
-        error: `Scrape failed for ${candidate.name}: ${scrapeResult.error}`,
-        candidate,
-      }, { status: 500 });
-    }
-
-    const idea = scrapeResult.idea;
-    const pins = scrapeResult.pins || [];
-
-    // Save idea + pins
-    const saveResult = await saveIdeaToDb(idea);
-    try { await savePinsToDb(idea.id, pins); } catch { /* non-critical */ }
-
-    // Step 3: Scrape annotations (if enabled)
-    let annotationStats = { total: 0, scraped: 0, newCreated: 0, existingUpdated: 0, failed: 0, skipped: 0 };
-
-    if (scrapeRelated) {
-      // Collect all unique items from all sources, deduplicated by name
-      const seen = new Set<string>();
-      const withUrl: { name: string; url: string }[] = [];
-      const withoutUrl: string[] = [];
-
-      // KLP Pivots
-      if (idea.klp_pivots) {
-        for (const pivot of idea.klp_pivots) {
-          if (pivot.url && !seen.has(pivot.name.toLowerCase())) {
-            seen.add(pivot.name.toLowerCase());
-            withUrl.push({ name: pivot.name, url: pivot.url });
-          }
-        }
-      }
-
-      // Related Interests
-      if (idea.related_interests) {
-        for (const interest of idea.related_interests) {
-          if (interest.url && !seen.has(interest.name.toLowerCase())) {
-            seen.add(interest.name.toLowerCase());
-            withUrl.push({ name: interest.name, url: interest.url });
-          }
-        }
-      }
-
-      // Top Annotations (extract URLs from href)
-      if (idea.top_annotations) {
-        const regex = /<a\s+href="([^"]*)"[^>]*>([^<]*)<\/a>/g;
-        let match;
-        while ((match = regex.exec(idea.top_annotations)) !== null) {
-          const url = match[1];
-          const name = match[2];
-          if (!seen.has(name.toLowerCase())) {
-            seen.add(name.toLowerCase());
-            if (url && url.includes('/ideas/')) {
-              withUrl.push({ name, url: url.startsWith('http') ? url : `https://www.pinterest.com${url}` });
-            } else {
-              withoutUrl.push(name);
-            }
-          }
-        }
-      }
-
-      // Pin Annotations (names only)
-      for (const pin of pins) {
-        if (pin.annotations) {
-          for (const annotation of pin.annotations) {
-            if (!seen.has(annotation.toLowerCase())) {
-              seen.add(annotation.toLowerCase());
-              withoutUrl.push(annotation);
-            }
-          }
-        }
-      }
-
-      const allItems = [
-        ...withUrl.map(item => ({ ...item, hasUrl: true as const })),
-        ...withoutUrl.map(name => ({ name, url: '', hasUrl: false as const })),
-      ];
-
-      annotationStats.total = allItems.length;
-      annotationStats.skipped = Math.max(0, allItems.length - maxAnnotations);
-
-      // Scrape up to maxAnnotations items
-      const toScrape = allItems.slice(0, maxAnnotations);
-
-      for (const item of toScrape) {
-        try {
-          let result;
-
-          if (item.hasUrl && item.url) {
-            // Direct scrape
-            const resp = await scrapePinterestIdea(item.url, {
-              acceptLanguage: langConfig.acceptLanguage,
-              pinterestDomain: langConfig.pinterestDomain,
-              language: langConfig.languageCode,
-            });
-            if (resp.success && resp.idea) {
-              const sr = await saveIdeaToDb(resp.idea);
-              try { if (resp.pins) await savePinsToDb(resp.idea.id, resp.pins); } catch { /* non-critical */ }
-              result = sr;
-            } else {
-              annotationStats.failed++;
-              continue;
-            }
-          } else {
-            // Find or scrape by name — check DB first, then construct URL
-            const { data: existing } = await supabase
-              .from('ideas')
-              .select('id')
-              .ilike('name', item.name)
-              .limit(1)
-              .single();
-
-            if (existing) {
-              annotationStats.existingUpdated++;
-              annotationStats.scraped++;
-              continue;
-            }
-
-            // Construct Pinterest URL and try to scrape
-            const slug = item.name.toLowerCase()
-              .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss')
-              .replace(/[^a-z0-9]+/g, '-')
-              .replace(/^-+|-+$/g, '');
-
-            const tryUrl = `https://${langConfig.pinterestDomain}/ideas/${slug}/`;
-
-            try {
-              const resp = await scrapePinterestIdea(tryUrl, {
-                acceptLanguage: langConfig.acceptLanguage,
-                pinterestDomain: langConfig.pinterestDomain,
-                language: langConfig.languageCode,
-              });
-
-              if (resp.success && resp.idea) {
-                result = await saveIdeaToDb(resp.idea);
-                try { if (resp.pins) await savePinsToDb(resp.idea.id, resp.pins); } catch { /* non-critical */ }
-              } else {
-                annotationStats.failed++;
-                continue;
-              }
-            } catch {
-              annotationStats.failed++;
-              continue;
-            }
-          }
-
-          if (result) {
-            annotationStats.scraped++;
-            if (result.isNew) annotationStats.newCreated++;
-            else annotationStats.existingUpdated++;
-          }
-
-          // Small delay between requests
-          await new Promise(resolve => setTimeout(resolve, 300));
-        } catch {
-          annotationStats.failed++;
-        }
-      }
-    }
-
+    // Immediate response
     return NextResponse.json({
       success: true,
-      idea: {
-        id: idea.id,
-        name: idea.name,
-        searches: idea.searches,
-        language: idea.language,
-        isNew: saveResult.isNew,
-      },
+      logId,
       candidate: {
+        id: candidate.id,
+        name: candidate.name,
+        searches: candidate.searches,
         score: candidate.score,
         pivot_count: candidate.pivot_count,
         related_count: candidate.related_count,
       },
-      annotations: annotationStats,
+      message: 'Scrape started in background. Check /sync-log for progress.',
     });
   } catch (error) {
     console.error('Auto-scrape error:', error);

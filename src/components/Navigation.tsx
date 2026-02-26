@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Search, Database, Compass, ImageIcon, Sparkles, Globe } from 'lucide-react';
+import { Search, Database, Compass, ImageIcon, Sparkles, Globe, RefreshCw } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 
 const navItems = [
@@ -11,6 +11,7 @@ const navItems = [
   { href: '/pins', label: 'Pins', icon: ImageIcon },
   { href: '/find', label: 'Find', icon: Compass },
   { href: '/discover', label: 'Discover', icon: Sparkles },
+  { href: '/sync-log', label: 'Sync', icon: RefreshCw },
 ];
 
 const languageOptions = [

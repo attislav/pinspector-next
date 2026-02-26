@@ -24,8 +24,8 @@ BEGIN
   WITH candidates AS (
     SELECT
       i.id, i.name, i.url, i.language, i.searches, i.last_scrape,
-      COALESCE(jsonb_array_length(i.klp_pivots), 0)::INTEGER AS pivot_count,
-      COALESCE(jsonb_array_length(i.related_interests), 0)::INTEGER AS related_count,
+      CASE WHEN i.klp_pivots IS NOT NULL AND jsonb_typeof(i.klp_pivots) = 'array' THEN jsonb_array_length(i.klp_pivots) ELSE 0 END::INTEGER AS pivot_count,
+      CASE WHEN i.related_interests IS NOT NULL AND jsonb_typeof(i.related_interests) = 'array' THEN jsonb_array_length(i.related_interests) ELSE 0 END::INTEGER AS related_count,
       EXTRACT(EPOCH FROM (NOW() - COALESCE(i.last_scrape, '2020-01-01'::TIMESTAMPTZ))) / 86400.0 AS age_days
     FROM public.ideas i
     WHERE i.language = p_language
