@@ -19,6 +19,15 @@ interface AutoScrapeCandidate {
   score: number;
 }
 
+function isOutdatedKeyword(name: string): boolean {
+  const currentYear = new Date().getFullYear();
+  const yearMatch = name.match(/\b(20\d{2})\b/);
+  if (!yearMatch) return false;
+  const year = parseInt(yearMatch[1]);
+  // Allow current year and next year, filter everything older
+  return year < currentYear;
+}
+
 async function updateLog(logId: number, data: Record<string, unknown>) {
   const supabase = getSupabase();
   await supabase.from('sync_log').update(data).eq('id', logId);
@@ -42,7 +51,7 @@ async function scrapeAnnotations(
   // KLP Pivots
   if (idea.klp_pivots) {
     for (const pivot of idea.klp_pivots) {
-      if (pivot.url && !seen.has(pivot.name.toLowerCase())) {
+      if (pivot.url && !seen.has(pivot.name.toLowerCase()) && !isOutdatedKeyword(pivot.name)) {
         seen.add(pivot.name.toLowerCase());
         withUrl.push({ name: pivot.name, url: pivot.url });
       }
@@ -52,7 +61,7 @@ async function scrapeAnnotations(
   // Related Interests
   if (idea.related_interests) {
     for (const interest of idea.related_interests) {
-      if (interest.url && !seen.has(interest.name.toLowerCase())) {
+      if (interest.url && !seen.has(interest.name.toLowerCase()) && !isOutdatedKeyword(interest.name)) {
         seen.add(interest.name.toLowerCase());
         withUrl.push({ name: interest.name, url: interest.url });
       }
@@ -66,7 +75,7 @@ async function scrapeAnnotations(
     while ((match = regex.exec(idea.top_annotations)) !== null) {
       const url = match[1];
       const name = match[2];
-      if (!seen.has(name.toLowerCase())) {
+      if (!seen.has(name.toLowerCase()) && !isOutdatedKeyword(name)) {
         seen.add(name.toLowerCase());
         if (url && url.includes('/ideas/')) {
           withUrl.push({ name, url: url.startsWith('http') ? url : `https://www.pinterest.com${url}` });
@@ -81,7 +90,7 @@ async function scrapeAnnotations(
   for (const pin of pins) {
     if (pin.annotations) {
       for (const annotation of pin.annotations) {
-        if (!seen.has(annotation.toLowerCase())) {
+        if (!seen.has(annotation.toLowerCase()) && !isOutdatedKeyword(annotation)) {
           seen.add(annotation.toLowerCase());
           withoutUrl.push(annotation);
         }
