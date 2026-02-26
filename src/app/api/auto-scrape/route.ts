@@ -230,31 +230,51 @@ async function scrapeAnnotations(
           continue;
         }
 
-        // Construct Pinterest URL and try to scrape
+        // Construct slug-only URL and follow Pinterest's redirect to get the real URL with ID
         const slug = item.name.toLowerCase()
           .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss')
           .replace(/[^a-z0-9]+/g, '-')
           .replace(/^-+|-+$/g, '');
 
-        const tryUrl = `https://${langConfig.pinterestDomain}/ideas/${slug}/`;
+        const urlsToTry = [
+          `https://${langConfig.pinterestDomain}/ideas/${slug}/`,
+          `https://www.pinterest.com/ideas/${slug}/`,
+        ];
 
-        try {
-          const resp = await scrapePinterestIdea(tryUrl, {
-            acceptLanguage: langConfig.acceptLanguage,
-            pinterestDomain: langConfig.pinterestDomain,
-            language: langConfig.languageCode,
-          });
-          if (resp.success && resp.idea) {
-            result = await saveIdeaToDb(resp.idea);
-            try { if (resp.pins) await savePinsToDb(resp.idea.id, resp.pins); } catch { /* non-critical */ }
-          } else {
-            stats.failed++;
-            await appendDebugLog(logId, `FAIL [${item.source}] "${item.name}" (slug: ${slug}) - ${resp.error || 'unknown error'}`);
+        let resolved = false;
+        for (const tryUrl of urlsToTry) {
+          try {
+            // Follow redirect to get the real URL with numeric ID
+            const redirectResp = await fetch(tryUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept-Language': langConfig.acceptLanguage,
+              },
+              redirect: 'follow',
+            });
+
+            const finalUrl = redirectResp.url;
+            if (!finalUrl.match(/\/ideas\/[^/]+\/\d+/)) continue;
+
+            const resp = await scrapePinterestIdea(finalUrl, {
+              acceptLanguage: langConfig.acceptLanguage,
+              pinterestDomain: langConfig.pinterestDomain,
+              language: langConfig.languageCode,
+            });
+            if (resp.success && resp.idea) {
+              result = await saveIdeaToDb(resp.idea);
+              try { if (resp.pins) await savePinsToDb(resp.idea.id, resp.pins); } catch { /* non-critical */ }
+              resolved = true;
+              break;
+            }
+          } catch {
             continue;
           }
-        } catch (e) {
+        }
+
+        if (!resolved) {
           stats.failed++;
-          await appendDebugLog(logId, `FAIL [${item.source}] "${item.name}" (slug: ${slug}) - ${e instanceof Error ? e.message : 'exception'}`);
+          await appendDebugLog(logId, `FAIL [${item.source}] "${item.name}" (slug: ${slug}) - not found on Pinterest`);
           continue;
         }
       }

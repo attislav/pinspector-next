@@ -3,8 +3,9 @@
 import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, ExternalLink, RefreshCw, TrendingUp, Calendar, Hash, Tag,
-  Sparkles, Link2, Loader2, X,
+  Sparkles, Link2, Loader2, X, GitBranch,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useIdeaDetail } from '@/hooks/useIdeaDetail';
 import { formatNumber, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/detail/StatCard';
@@ -83,6 +84,12 @@ export default function IdeaDetailPage() {
               <RefreshCw className={`w-4 h-4 ${detail.rescraping ? 'animate-spin' : ''}`} />
               {detail.rescraping ? 'Lädt...' : 'Neu scrapen'}
             </button>
+            {idea.klp_pivots && idea.klp_pivots.length > 0 && (
+              <Link href={`/keyword-tree/${idea.id}`}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors text-sm">
+                <GitBranch className="w-4 h-4" /> Keyword Tree
+              </Link>
+            )}
             <a href={idea.url || '#'} target="_blank" rel="noopener noreferrer"
               className="flex items-center gap-2 px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition-colors text-sm">
               <ExternalLink className="w-4 h-4" /> Auf Pinterest öffnen
