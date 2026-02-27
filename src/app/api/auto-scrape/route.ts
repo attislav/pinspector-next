@@ -109,13 +109,19 @@ function collectAnnotations(
     }
   }
 
-  // Pin Annotations (names only)
+  // Pin Annotations (resolve URLs from annotation_url_map when possible)
+  const urlMap = idea.annotation_url_map || {};
   for (const pin of pins) {
     if (pin.annotations) {
       for (const annotation of pin.annotations) {
         if (shouldInclude(annotation)) {
           seen.add(annotation.toLowerCase());
-          withoutUrl.push({ name: annotation, url: '', hasUrl: false, source: 'pin_annotation' });
+          const resolvedUrl = urlMap[annotation.toLowerCase()];
+          if (resolvedUrl) {
+            withUrl.push({ name: annotation, url: resolvedUrl, hasUrl: true, source: 'pin_annotation' });
+          } else {
+            withoutUrl.push({ name: annotation, url: '', hasUrl: false, source: 'pin_annotation' });
+          }
         }
       }
     }

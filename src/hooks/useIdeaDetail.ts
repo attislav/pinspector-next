@@ -211,21 +211,36 @@ export function useIdeaDetail(id: string) {
     }
   };
 
-  // Build a map of annotation name → URL from top_annotations HTML
+  // Build a map of annotation name → URL from annotation_url_map JSONB (primary)
+  // and top_annotations HTML (fallback for older data without the JSONB field)
   const annotationUrlMap = useMemo(() => {
     const map = new Map<string, string>();
-    if (!idea?.top_annotations) return map;
-    const regex = /<a\s+href="([^"]*)"[^>]*>([^<]*)<\/a>/g;
-    let match;
-    while ((match = regex.exec(idea.top_annotations)) !== null) {
-      const url = match[1];
-      const name = match[2];
-      if (url && url.includes('/ideas/')) {
-        map.set(name.toLowerCase(), url.startsWith('http') ? url : `https://www.pinterest.com${url}`);
+
+    // Primary source: annotation_url_map JSONB (has ALL annotation URLs, not just top 20)
+    if (idea?.annotation_url_map) {
+      for (const [name, rawUrl] of Object.entries(idea.annotation_url_map)) {
+        const url = rawUrl as string;
+        if (url && url.includes('/ideas/')) {
+          map.set(name.toLowerCase(), url.startsWith('http') ? url : `https://www.pinterest.com${url}`);
+        }
       }
     }
+
+    // Fallback: parse top_annotations HTML (for ideas scraped before annotation_url_map existed)
+    if (idea?.top_annotations && map.size === 0) {
+      const regex = /<a\s+href="([^"]*)"[^>]*>([^<]*)<\/a>/g;
+      let match;
+      while ((match = regex.exec(idea.top_annotations)) !== null) {
+        const url = match[1];
+        const name = match[2];
+        if (url && url.includes('/ideas/')) {
+          map.set(name.toLowerCase(), url.startsWith('http') ? url : `https://www.pinterest.com${url}`);
+        }
+      }
+    }
+
     return map;
-  }, [idea?.top_annotations]);
+  }, [idea?.top_annotations, idea?.annotation_url_map]);
 
   const scrapeAnnotation = async (annotationName: string) => {
     setScrapingAnnotation(annotationName);
@@ -310,13 +325,18 @@ export function useIdeaDetail(id: string) {
       }
     }
 
-    // 4. Pin Annotations (names only, no URLs)
+    // 4. Pin Annotations (resolve URLs from annotationUrlMap when possible)
     for (const pin of pins) {
       if (pin.annotations) {
         for (const annotation of pin.annotations) {
           if (!seen.has(annotation.toLowerCase())) {
             seen.add(annotation.toLowerCase());
-            withoutUrl.push(annotation);
+            const resolvedUrl = annotationUrlMap.get(annotation.toLowerCase());
+            if (resolvedUrl) {
+              withUrl.push({ name: annotation, url: resolvedUrl });
+            } else {
+              withoutUrl.push(annotation);
+            }
           }
         }
       }

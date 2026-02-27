@@ -1,14 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabase } from '@/lib/db';
-import { scrapePinterestIdea, extractIdFromUrl } from '@/lib/pinterest-scraper';
+import { scrapePinterestIdea, extractIdFromUrl, isValidPinterestIdeasUrl } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
 import { getLanguageConfig, detectLanguageFromUrl } from '@/lib/language-config';
 
 export const maxDuration = 30;
 
+// Resolve a Pinterest Ideas URL that may not have a numeric ID
+// by following redirects to find the canonical URL with ID
+async function resolveAnnotationUrl(url: string, langConfig: ReturnType<typeof getLanguageConfig>): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept-Language': langConfig.acceptLanguage,
+      },
+      redirect: 'follow',
+    });
+    const finalUrl = response.url;
+    if (finalUrl && /\/ideas\/[^/]+\/\d+/.test(finalUrl)) {
+      return finalUrl;
+    }
+  } catch {
+    // ignore fetch errors
+  }
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { url, skipIfRecent, language } = await request.json();
+    let { url, skipIfRecent, language } = await request.json();
     const detectedLang = detectLanguageFromUrl(url);
     const langConfig = getLanguageConfig(language || detectedLang || undefined);
 
@@ -17,6 +38,20 @@ export async function POST(request: NextRequest) {
         { success: false, error: 'URL ist erforderlich' },
         { status: 400 }
       );
+    }
+
+    // If URL doesn't have a numeric ID (e.g. /ideas/keyword/ without /123456/),
+    // try to resolve it by following redirects
+    if (!isValidPinterestIdeasUrl(url) && url.includes('/ideas/')) {
+      const resolvedUrl = await resolveAnnotationUrl(url, langConfig);
+      if (resolvedUrl) {
+        url = resolvedUrl;
+      } else {
+        return NextResponse.json(
+          { success: false, error: 'Annotation-URL konnte nicht aufgelöst werden' },
+          { status: 400 }
+        );
+      }
     }
 
     // If skipIfRecent is true, first check if we already have this idea with recent scrape
