@@ -24,6 +24,7 @@ export async function saveIdeaToDb(idea: Idea): Promise<{ isNew: boolean; isDupl
       last_scrape: new Date().toISOString(),
       related_interests: idea.related_interests,
       top_annotations: idea.top_annotations,
+      annotation_url_map: idea.annotation_url_map,
       seo_breadcrumbs: idea.seo_breadcrumbs,
       klp_pivots: idea.klp_pivots,
     };
@@ -58,6 +59,7 @@ export async function saveIdeaToDb(idea: Idea): Promise<{ isNew: boolean; isDupl
     last_scrape: new Date().toISOString(),
     related_interests: idea.related_interests,
     top_annotations: idea.top_annotations,
+    annotation_url_map: idea.annotation_url_map,
     seo_breadcrumbs: idea.seo_breadcrumbs,
     klp_pivots: idea.klp_pivots,
     language: idea.language,

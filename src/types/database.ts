@@ -9,6 +9,7 @@ export interface Idea {
   last_scrape: string;
   related_interests: RelatedInterest[];
   top_annotations: string | null;
+  annotation_url_map: Record<string, string> | null;  // lowercased name → absolute URL
   seo_breadcrumbs: string[];
   klp_pivots: KlpPivot[];
   language: string | null;

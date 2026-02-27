@@ -237,6 +237,8 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
     // Extract annotations from pins
     const pins = reduxState?.pins || {};
     const annotationCounts = new Map<string, { count: number; url: string }>();
+    // Store ALL annotation name→URL mappings (not just top 20)
+    const allAnnotationUrls = new Map<string, string>();
 
     for (const pin of Object.values(pins) as any[]) {
       const annotationsRaw = pin?.pin_join?.annotations_with_links;
@@ -250,19 +252,37 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
         annotationsArray = Object.values(annotationsRaw);
       }
 
-      // Filter valid annotations
+      // Collect annotations - relaxed URL filter (accept any /ideas/ URL)
       for (const item of annotationsArray) {
-        if (!item?.name || !item?.url) continue;
+        if (!item?.name) continue;
 
-        const hasIdeas = item.url.includes('/ideas/');
-        const endsWithNumber = /\/\d+\/?$/.test(item.url);
-        const noParentheses = !item.url.includes('(') && !item.url.includes(')');
+        // Get URL from item.url or item.link (Pinterest may use either)
+        const rawUrl = item.url || item.link;
+        if (!rawUrl || typeof rawUrl !== 'string') continue;
 
-        if (hasIdeas && endsWithNumber && noParentheses) {
-          const current = annotationCounts.get(item.name) || { count: 0, url: item.url };
-          annotationCounts.set(item.name, { count: current.count + 1, url: item.url });
+        const noParentheses = !rawUrl.includes('(') && !rawUrl.includes(')');
+        const hasIdeas = rawUrl.includes('/ideas/');
+
+        if (hasIdeas && noParentheses) {
+          const current = annotationCounts.get(item.name) || { count: 0, url: rawUrl };
+          annotationCounts.set(item.name, { count: current.count + 1, url: current.url });
+
+          // Always store the URL mapping for every annotation
+          if (!allAnnotationUrls.has(item.name.toLowerCase())) {
+            // Ensure URL is absolute
+            const absUrl = rawUrl.startsWith('http')
+              ? rawUrl
+              : `https://${baseDomain}${rawUrl}`;
+            allAnnotationUrls.set(item.name.toLowerCase(), absUrl);
+          }
         }
       }
+    }
+
+    // Build annotation_url_map JSONB (all annotations, not just top 20)
+    const annotationUrlMap: Record<string, string> = {};
+    for (const [name, url] of allAnnotationUrls) {
+      annotationUrlMap[name] = url;
     }
 
     // Get top annotations sorted by frequency
@@ -272,7 +292,13 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
 
     // Format as HTML links (matching original format)
     const topAnnotations = topAnnotationsList
-      .map(([name, data]) => `<a href="${data.url}" target="_blank">${name}</a> (${data.count})`)
+      .map(([name, data]) => {
+        // Ensure URL is absolute for HTML storage
+        const absUrl = data.url.startsWith('http')
+          ? data.url
+          : `https://${baseDomain}${data.url}`;
+        return `<a href="${absUrl}" target="_blank">${name}</a> (${data.count})`;
+      })
       .join(', ');
 
     // Extract Pins (up to 20)
@@ -394,6 +420,7 @@ export async function scrapePinterestIdea(url: string, options?: ScrapeOptions):
       last_scrape: now,
       related_interests: relatedInterests,
       top_annotations: topAnnotations,
+      annotation_url_map: Object.keys(annotationUrlMap).length > 0 ? annotationUrlMap : null,
       seo_breadcrumbs: seoBreadcrumbs,
       klp_pivots: klpPivots,
       language: detectLanguageFromPinterestData(interestData) || options?.language || null,
