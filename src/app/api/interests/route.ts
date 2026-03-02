@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const pageSize = parseInt(searchParams.get('pageSize') || '30');
     const search = searchParams.get('search') || '';
+    const excludeKeywords = searchParams.get('excludeKeywords') || '';
     const sortBy = searchParams.get('sortBy') || 'last_scrape';
     const sortOrder = searchParams.get('sortOrder') || 'desc';
     const minSearches = searchParams.get('minSearches');
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
       p_limit: pageSize,
       p_offset: offset,
       p_language: language || null,
+      p_exclude_keywords: excludeKeywords || null,
     });
 
     if (error) throw error;

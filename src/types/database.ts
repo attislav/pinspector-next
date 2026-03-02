@@ -148,6 +148,7 @@ export interface FindInterestsResult {
 // Filter types for interests page
 export interface InterestFilters {
   search?: string;
+  excludeKeywords?: string;
   category?: string;
   mainCategory?: string;
   subCategory?: string;

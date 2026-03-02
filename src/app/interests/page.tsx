@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Search, Download, Trash2, ChevronLeft, ChevronRight, ExternalLink, Filter, X,
-  RefreshCw, Eye, ArrowUpDown, ArrowUp, ArrowDown, Loader2,
+  RefreshCw, Eye, ArrowUpDown, ArrowUp, ArrowDown, Loader2, Copy, List,
 } from 'lucide-react';
 import { Idea, InterestFilters, PaginatedResponse, CategoriesResponse } from '@/types/database';
 import { formatNumber, formatCompactNumber, formatDateShort, formatShortDate } from '@/lib/format';
@@ -22,9 +22,11 @@ export default function InterestsPage() {
   const [showFilters, setShowFilters] = useState(true);
   const [filters, setFilters] = useState<InterestFilters>({
     search: '',
+    excludeKeywords: '',
     sortBy: 'searches',
     sortOrder: 'desc',
   });
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoriesResponse>({
     mainCategories: [],
     subCategories: {},
@@ -137,6 +139,22 @@ export default function InterestsPage() {
   const toggleSelectAll = () => { selectedIds.size === ideas.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(ideas.map(idea => idea.id))); };
   const toggleSelect = (id: string) => { setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); };
 
+  const getSelectedNames = () => ideas.filter(idea => selectedIds.has(idea.id)).map(idea => idea.name);
+
+  const copyAsCommaList = async () => {
+    const names = getSelectedNames();
+    await navigator.clipboard.writeText(names.join(', '));
+    setCopyFeedback('Kommaliste kopiert!');
+    setTimeout(() => setCopyFeedback(null), 2000);
+  };
+
+  const copyAsList = async () => {
+    const names = getSelectedNames();
+    await navigator.clipboard.writeText(names.join('\n'));
+    setCopyFeedback('Liste kopiert!');
+    setTimeout(() => setCopyFeedback(null), 2000);
+  };
+
   const handleSort = (column: InterestFilters['sortBy']) => {
     if (!column) return;
     setFilters(prev => ({ ...prev, sortBy: column, sortOrder: prev.sortBy === column && prev.sortOrder === 'desc' ? 'asc' : 'desc' }));
@@ -175,6 +193,12 @@ export default function InterestsPage() {
           </button>
           {selectedIds.size > 0 && (
             <>
+              <button onClick={copyAsCommaList} className="flex items-center gap-2 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm" title="Als Kommaliste kopieren">
+                <Copy className="w-4 h-4" /> Komma
+              </button>
+              <button onClick={copyAsList} className="flex items-center gap-2 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm" title="Als Liste kopieren (zeilenweise)">
+                <List className="w-4 h-4" /> Liste
+              </button>
               <button onClick={handleBulkRescrape} disabled={rescraping} className="flex items-center gap-2 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-50 text-sm">
                 {rescraping ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {selectedIds.size} rescrapen
               </button>
@@ -182,6 +206,9 @@ export default function InterestsPage() {
                 <Trash2 className="w-4 h-4" /> {selectedIds.size} löschen
               </button>
             </>
+          )}
+          {copyFeedback && (
+            <span className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm animate-pulse">{copyFeedback}</span>
           )}
           <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition-colors text-sm">
             <Download className="w-4 h-4" /> {selectedIds.size > 0 ? `${selectedIds.size} exportieren` : 'Exportieren'}
@@ -205,13 +232,22 @@ export default function InterestsPage() {
 
       {/* Search and Filters */}
       <div className="mb-6 space-y-4">
-        <form onSubmit={handleSearch} className="flex gap-3">
-          <div className="flex-1 relative">
-            <input type="text" value={filters.search || ''} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Suche nach Namen..."
-              className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none" />
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+        <form onSubmit={handleSearch} className="space-y-2">
+          <div className="flex gap-3">
+            <div className="flex-1 relative">
+              <input type="text" value={filters.search || ''} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Suche nach Namen... (mehrere Wörter = alle müssen enthalten sein)"
+                className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none" />
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            </div>
+            <button type="submit" className="px-6 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition-colors shrink-0">Suchen</button>
           </div>
-          <button type="submit" className="px-6 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition-colors">Suchen</button>
+          <div className="flex gap-3">
+            <div className="flex-1 relative">
+              <input type="text" value={filters.excludeKeywords || ''} onChange={(e) => setFilters({ ...filters, excludeKeywords: e.target.value })} placeholder="Ausschließen (kommagetrennt, z.B.: vegan, glutenfrei, einfach)"
+                className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none text-sm" />
+              <X className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            </div>
+          </div>
         </form>
 
         {showFilters && (
@@ -270,7 +306,7 @@ export default function InterestsPage() {
                 </select>
               </div>
               <div className="col-span-2 flex items-end">
-                <button onClick={() => { setFilters({ search: '', sortBy: 'searches', sortOrder: 'desc', language: undefined }); setPage(1); }} className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900">
+                <button onClick={() => { setFilters({ search: '', excludeKeywords: '', sortBy: 'searches', sortOrder: 'desc', language: undefined }); setPage(1); }} className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900">
                   <X className="w-4 h-4" /> Filter zurücksetzen
                 </button>
               </div>
