@@ -121,6 +121,7 @@ export interface PinDetail {
     site_name: string | null;
     favicon_url: string | null;
   } | null;
+  ai_info: Record<string, unknown> | null;
   scraped_at: string;
 }
 

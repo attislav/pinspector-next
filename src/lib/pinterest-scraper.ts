@@ -58,6 +58,55 @@ export interface ScrapeOptions {
   language?: string;
 }
 
+// --- AI field detection ---
+
+const KNOWN_AI_KEYS = new Set([
+  'isAiGenerated', 'is_ai_generated',
+  'aiDisclosure', 'ai_disclosure',
+  'sourceType', 'source_type',
+  'aiLabel', 'ai_label',
+  'contentCredential', 'content_credential',
+  'aiClassification', 'ai_classification',
+  'generativeAiInfo', 'generative_ai_info',
+]);
+
+const AI_KEY_PATTERNS: RegExp[] = [
+  /(?:^|[_])ai[_A-Z]/i,
+  /generat/i,
+  /disclos/i,
+  /classif/i,
+  /synth/i,
+  /iptc/i,
+  /c2pa/i,
+  /credential/i,
+];
+
+function extractAiInfo(v3Data: Record<string, any>, reduxPin: Record<string, any>): Record<string, unknown> | null {
+  const result: Record<string, unknown> = {};
+
+  function scan(obj: unknown, path: string) {
+    if (obj === null || obj === undefined || typeof obj !== 'object') return;
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      const currentPath = path ? `${path}.${key}` : key;
+
+      if (KNOWN_AI_KEYS.has(key)) {
+        result[currentPath] = value;
+      } else if (AI_KEY_PATTERNS.some(p => p.test(key))) {
+        result[currentPath] = value;
+      }
+
+      if (typeof value === 'object' && value !== null) {
+        scan(value, currentPath);
+      }
+    }
+  }
+
+  scan(v3Data, '');
+  scan(reduxPin, '');
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
 // Parse Pinterest Ideas page and extract data
 export async function scrapePinterestIdea(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
   try {
@@ -745,6 +794,7 @@ export async function scrapePinterestPin(pinId: string, options?: ScrapeOptions)
       is_promoted: !!(v3.isPromoted || pin?.is_promoted),
       tracking_params: v3.trackingParams || pin?.tracking_params || null,
       rich_metadata: richMetadata,
+      ai_info: extractAiInfo(v3, pin),
       scraped_at: now,
     };
 
