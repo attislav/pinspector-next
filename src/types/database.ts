@@ -145,6 +145,15 @@ export interface FindInterestsResult {
   duplicates: string[];
 }
 
+// Keyword Collection (persisted in localStorage)
+export interface KeywordCollection {
+  id: string;
+  name: string;
+  keywords: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 // Filter types for interests page
 export interface InterestFilters {
   search?: string;

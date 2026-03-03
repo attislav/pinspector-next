@@ -9,6 +9,7 @@ import {
 import { Idea, InterestFilters, PaginatedResponse, CategoriesResponse } from '@/types/database';
 import { formatNumber, formatCompactNumber, formatDateShort, formatShortDate } from '@/lib/format';
 import { useLanguage } from '@/context/LanguageContext';
+import { AddToCollectionDropdown } from '@/components/AddToCollectionDropdown';
 
 type IdeaRow = Idea & { history_count?: number; prev_searches?: number | null };
 
@@ -199,6 +200,7 @@ export default function InterestsPage() {
               <button onClick={copyAsList} className="flex items-center gap-2 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm" title="Als Liste kopieren (zeilenweise)">
                 <List className="w-4 h-4" /> Liste
               </button>
+              <AddToCollectionDropdown keywords={getSelectedNames()} label={`${selectedIds.size} sammeln`} />
               <button onClick={handleBulkRescrape} disabled={rescraping} className="flex items-center gap-2 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-50 text-sm">
                 {rescraping ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {selectedIds.size} rescrapen
               </button>
