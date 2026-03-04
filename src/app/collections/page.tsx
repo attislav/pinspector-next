@@ -301,13 +301,13 @@ export default function CollectionsPage() {
                                 <td className="px-3 py-1.5 text-sm text-right font-medium text-red-700">
                                   {item.searches > 0 ? formatNumber(item.searches) : <span className="text-gray-300">-</span>}
                                 </td>
-                                <td className="px-2 py-1.5">
+                                <td className="px-2 py-1.5 text-right">
                                   <button
                                     onClick={() => removeItem(collection.id, item.keyword)}
-                                    className="p-1 text-gray-300 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100"
+                                    className="p-1 text-gray-400 hover:text-red-600 transition-colors"
                                     title="Entfernen"
                                   >
-                                    <X className="w-3.5 h-3.5" />
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 </td>
                               </tr>
