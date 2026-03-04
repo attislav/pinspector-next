@@ -6,7 +6,7 @@ import {
   Search, Download, Trash2, ChevronLeft, ChevronRight, ExternalLink, Filter, X,
   RefreshCw, Eye, ArrowUpDown, ArrowUp, ArrowDown, Loader2, Copy, List,
 } from 'lucide-react';
-import { Idea, InterestFilters, PaginatedResponse, CategoriesResponse } from '@/types/database';
+import { Idea, InterestFilters, PaginatedResponse, CategoriesResponse, KeywordCollectionItem } from '@/types/database';
 import { formatNumber, formatCompactNumber, formatDateShort, formatShortDate } from '@/lib/format';
 import { useLanguage } from '@/context/LanguageContext';
 import { AddToCollectionDropdown } from '@/components/AddToCollectionDropdown';
@@ -19,7 +19,7 @@ export default function InterestsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(30);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedItems, setSelectedItems] = useState<Map<string, KeywordCollectionItem>>(new Map());
   const [showFilters, setShowFilters] = useState(true);
   const [filters, setFilters] = useState<InterestFilters>({
     search: '',
@@ -91,24 +91,24 @@ export default function InterestsPage() {
     if (!confirm('Möchtest du dieses Interest wirklich löschen?')) return;
     try {
       const response = await fetch('/api/interests', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }) });
-      if (response.ok) { setIdeas(ideas.filter(idea => idea.id !== id)); setTotal(total - 1); setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; }); }
+      if (response.ok) { setIdeas(ideas.filter(idea => idea.id !== id)); setTotal(total - 1); setSelectedItems(prev => { const next = new Map(prev); next.delete(id); return next; }); }
     } catch (error) { console.error('Delete error:', error); }
   };
 
   const handleBulkDelete = async () => {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`Möchtest du ${selectedIds.size} Interests wirklich löschen?`)) return;
+    if (selectedItems.size === 0) return;
+    if (!confirm(`Möchtest du ${selectedItems.size} Interests wirklich löschen?`)) return;
     try {
-      const response = await fetch('/api/interests', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: Array.from(selectedIds) }) });
-      if (response.ok) { setIdeas(ideas.filter(idea => !selectedIds.has(idea.id))); setTotal(total - selectedIds.size); setSelectedIds(new Set()); }
+      const response = await fetch('/api/interests', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: Array.from(selectedItems.keys()) }) });
+      if (response.ok) { setIdeas(ideas.filter(idea => !selectedItems.has(idea.id))); setTotal(total - selectedItems.size); setSelectedItems(new Map()); }
     } catch (error) { console.error('Bulk delete error:', error); }
   };
 
   const handleBulkRescrape = async () => {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`Möchtest du ${selectedIds.size} Interests neu scrapen?`)) return;
+    if (selectedItems.size === 0) return;
+    if (!confirm(`Möchtest du ${selectedItems.size} Interests neu scrapen?`)) return;
     setRescraping(true);
-    const selectedIdeas = ideas.filter(idea => selectedIds.has(idea.id));
+    const selectedIdeas = ideas.filter(idea => selectedItems.has(idea.id));
     setRescrapeProgress({ current: 0, total: selectedIdeas.length, currentName: '' });
     try {
       for (let i = 0; i < selectedIdeas.length; i++) {
@@ -119,12 +119,12 @@ export default function InterestsPage() {
         if (i < selectedIdeas.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
       }
       await fetchIdeas();
-      setSelectedIds(new Set());
+      setSelectedItems(new Map());
     } finally { setRescraping(false); setRescrapeProgress({ current: 0, total: 0, currentName: '' }); }
   };
 
   const handleExport = async () => {
-    const ids = selectedIds.size > 0 ? Array.from(selectedIds) : undefined;
+    const ids = selectedItems.size > 0 ? Array.from(selectedItems.keys()) : undefined;
     try {
       const response = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, filters }) });
       if (response.ok) {
@@ -137,21 +137,36 @@ export default function InterestsPage() {
     } catch (error) { console.error('Export error:', error); }
   };
 
-  const toggleSelectAll = () => { selectedIds.size === ideas.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(ideas.map(idea => idea.id))); };
-  const toggleSelect = (id: string) => { setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); };
+  const toggleSelectAll = () => {
+    const allOnPageSelected = ideas.length > 0 && ideas.every(idea => selectedItems.has(idea.id));
+    if (allOnPageSelected) {
+      // Deselect all on current page
+      setSelectedItems(prev => { const next = new Map(prev); ideas.forEach(idea => next.delete(idea.id)); return next; });
+    } else {
+      // Select all on current page (add to existing selection)
+      setSelectedItems(prev => { const next = new Map(prev); ideas.forEach(idea => next.set(idea.id, { keyword: idea.name, searches: idea.searches })); return next; });
+    }
+  };
+  const toggleSelect = (id: string) => {
+    setSelectedItems(prev => {
+      const next = new Map(prev);
+      if (next.has(id)) { next.delete(id); }
+      else { const idea = ideas.find(i => i.id === id); if (idea) next.set(id, { keyword: idea.name, searches: idea.searches }); }
+      return next;
+    });
+  };
 
-  const getSelectedNames = () => ideas.filter(idea => selectedIds.has(idea.id)).map(idea => idea.name);
+  const getSelectedCollectionItems = (): KeywordCollectionItem[] => Array.from(selectedItems.values());
+  const getSelectedNames = () => Array.from(selectedItems.values()).map(i => i.keyword);
 
   const copyAsCommaList = async () => {
-    const names = getSelectedNames();
-    await navigator.clipboard.writeText(names.join(', '));
+    await navigator.clipboard.writeText(getSelectedNames().join(', '));
     setCopyFeedback('Kommaliste kopiert!');
     setTimeout(() => setCopyFeedback(null), 2000);
   };
 
   const copyAsList = async () => {
-    const names = getSelectedNames();
-    await navigator.clipboard.writeText(names.join('\n'));
+    await navigator.clipboard.writeText(getSelectedNames().join('\n'));
     setCopyFeedback('Liste kopiert!');
     setTimeout(() => setCopyFeedback(null), 2000);
   };
@@ -192,7 +207,7 @@ export default function InterestsPage() {
           <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${showFilters ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
             <Filter className="w-4 h-4" /> Filter
           </button>
-          {selectedIds.size > 0 && (
+          {selectedItems.size > 0 && (
             <>
               <button onClick={copyAsCommaList} className="flex items-center gap-2 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm" title="Als Kommaliste kopieren">
                 <Copy className="w-4 h-4" /> Komma
@@ -200,12 +215,12 @@ export default function InterestsPage() {
               <button onClick={copyAsList} className="flex items-center gap-2 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm" title="Als Liste kopieren (zeilenweise)">
                 <List className="w-4 h-4" /> Liste
               </button>
-              <AddToCollectionDropdown keywords={getSelectedNames()} label={`${selectedIds.size} sammeln`} />
+              <AddToCollectionDropdown items={getSelectedCollectionItems()} label={`${selectedItems.size} sammeln`} />
               <button onClick={handleBulkRescrape} disabled={rescraping} className="flex items-center gap-2 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-50 text-sm">
-                {rescraping ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {selectedIds.size} rescrapen
+                {rescraping ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {selectedItems.size} rescrapen
               </button>
               <button onClick={handleBulkDelete} disabled={rescraping} className="flex items-center gap-2 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50 text-sm">
-                <Trash2 className="w-4 h-4" /> {selectedIds.size} löschen
+                <Trash2 className="w-4 h-4" /> {selectedItems.size} löschen
               </button>
             </>
           )}
@@ -213,7 +228,7 @@ export default function InterestsPage() {
             <span className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm animate-pulse">{copyFeedback}</span>
           )}
           <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 transition-colors text-sm">
-            <Download className="w-4 h-4" /> {selectedIds.size > 0 ? `${selectedIds.size} exportieren` : 'Exportieren'}
+            <Download className="w-4 h-4" /> {selectedItems.size > 0 ? `${selectedItems.size} exportieren` : 'Exportieren'}
           </button>
         </div>
       </div>
@@ -324,7 +339,7 @@ export default function InterestsPage() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-3 py-3 text-left">
-                  <input type="checkbox" checked={ideas.length > 0 && selectedIds.size === ideas.length} onChange={toggleSelectAll} className="rounded border-gray-300" />
+                  <input type="checkbox" checked={ideas.length > 0 && ideas.every(idea => selectedItems.has(idea.id))} onChange={toggleSelectAll} className="rounded border-gray-300" />
                 </th>
                 <th className="px-3 py-3 text-left">
                   <button onClick={() => handleSort('name')} className="flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-red-700 transition-colors">Name <SortIcon column="name" /></button>
@@ -368,7 +383,7 @@ export default function InterestsPage() {
                   const histCount = idea.history_count ?? 0;
                   return (
                     <tr key={idea.id} className="hover:bg-gray-50">
-                      <td className="px-3 py-2.5"><input type="checkbox" checked={selectedIds.has(idea.id)} onChange={() => toggleSelect(idea.id)} className="rounded border-gray-300" /></td>
+                      <td className="px-3 py-2.5"><input type="checkbox" checked={selectedItems.has(idea.id)} onChange={() => toggleSelect(idea.id)} className="rounded border-gray-300" /></td>
                       <td className="px-3 py-2.5">
                         <Link href={`/interests/${idea.id}`} className="font-medium text-red-700 hover:text-red-900 hover:underline">{idea.name}</Link>
                       </td>
@@ -446,7 +461,7 @@ export default function InterestsPage() {
               <div key={idea.id} className="bg-white rounded-lg border border-gray-200 p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <input type="checkbox" checked={selectedIds.has(idea.id)} onChange={() => toggleSelect(idea.id)} className="rounded border-gray-300 mt-1" />
+                    <input type="checkbox" checked={selectedItems.has(idea.id)} onChange={() => toggleSelect(idea.id)} className="rounded border-gray-300 mt-1" />
                     <div className="min-w-0">
                       <Link href={`/interests/${idea.id}`} className="font-medium text-red-700 hover:text-red-900 hover:underline block truncate">{idea.name}</Link>
                       <div className="text-sm text-gray-600 truncate mt-0.5">
