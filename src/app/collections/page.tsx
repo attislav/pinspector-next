@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import {
-  Plus, Trash2, Copy, List, Download, Pencil, Check, X, FolderOpen, ChevronDown, ChevronRight,
+  Plus, Trash2, Copy, List, Download, Pencil, Check, X, FolderOpen, ChevronDown, ChevronRight, CheckCircle, Circle,
 } from 'lucide-react';
 import { useKeywordCollections } from '@/context/KeywordCollectionContext';
 import { KeywordCollectionItem } from '@/types/database';
@@ -12,7 +12,7 @@ import { formatShortDate, formatNumber } from '@/lib/format';
 export default function CollectionsPage() {
   const {
     collections, createCollection, deleteCollection, renameCollection,
-    addItems, removeItem, updateItems,
+    addItems, removeItem, updateItems, toggleItemDone, toggleItemsDone,
   } = useKeywordCollections();
   const [newCollectionName, setNewCollectionName] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -205,6 +205,9 @@ export default function CollectionsPage() {
                       <div>
                         <span className="font-semibold text-gray-900">{collection.name}</span>
                         <span className="ml-2 text-sm text-gray-500">{collection.items.length} Keywords</span>
+                        {collection.items.some(i => i.done) && (
+                          <span className="ml-1.5 text-xs text-green-600">{collection.items.filter(i => i.done).length} erledigt</span>
+                        )}
                       </div>
                     )}
                     <p className="text-xs text-gray-400 mt-0.5">
@@ -318,6 +321,18 @@ export default function CollectionsPage() {
                               >
                                 <List className="w-3.5 h-3.5" /> {selCount} als Liste
                               </button>
+                              <button
+                                onClick={() => { toggleItemsDone(collection.id, Array.from(selectedKeywords), true); setSelectedKeywords(new Set()); }}
+                                className="flex items-center gap-1 px-3 py-1.5 text-sm text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+                              >
+                                <CheckCircle className="w-3.5 h-3.5" /> {selCount} abhaken
+                              </button>
+                              <button
+                                onClick={() => { toggleItemsDone(collection.id, Array.from(selectedKeywords), false); setSelectedKeywords(new Set()); }}
+                                className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+                              >
+                                <Circle className="w-3.5 h-3.5" /> {selCount} offen setzen
+                              </button>
                             </>
                           )}
                         </>
@@ -352,6 +367,9 @@ export default function CollectionsPage() {
                                   className="rounded border-gray-300"
                                 />
                               </th>
+                              <th className="px-2 py-2 w-8 text-center text-xs font-semibold text-gray-600" title="Erledigt">
+                                <CheckCircle className="w-3.5 h-3.5 mx-auto text-gray-400" />
+                              </th>
                               <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Keyword</th>
                               <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Searches</th>
                               <th className="px-2 py-2 w-20"></th>
@@ -359,7 +377,7 @@ export default function CollectionsPage() {
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                             {collection.items.map((item, idx) => (
-                              <tr key={`${item.keyword}-${idx}`} className="hover:bg-gray-50">
+                              <tr key={`${item.keyword}-${idx}`} className={`hover:bg-gray-50 ${item.done ? 'bg-green-50/50' : ''}`}>
                                 <td className="px-2 py-1.5">
                                   <input
                                     type="checkbox"
@@ -368,16 +386,25 @@ export default function CollectionsPage() {
                                     className="rounded border-gray-300"
                                   />
                                 </td>
+                                <td className="px-2 py-1.5 text-center">
+                                  <button
+                                    onClick={() => toggleItemDone(collection.id, item.keyword)}
+                                    className={`p-0.5 rounded transition-colors ${item.done ? 'text-green-600 hover:text-green-800' : 'text-gray-300 hover:text-green-500'}`}
+                                    title={item.done ? 'Als offen markieren' : 'Als erledigt markieren'}
+                                  >
+                                    {item.done ? <CheckCircle className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+                                  </button>
+                                </td>
                                 <td className="px-3 py-1.5 text-sm">
                                   {item.id ? (
-                                    <Link href={`/interests/${item.id}`} className="text-red-700 hover:text-red-900 hover:underline">
+                                    <Link href={`/interests/${item.id}`} className={`hover:underline ${item.done ? 'text-gray-400 line-through' : 'text-red-700 hover:text-red-900'}`}>
                                       {item.keyword}
                                     </Link>
                                   ) : (
-                                    <span className="text-gray-800">{item.keyword}</span>
+                                    <span className={item.done ? 'text-gray-400 line-through' : 'text-gray-800'}>{item.keyword}</span>
                                   )}
                                 </td>
-                                <td className="px-3 py-1.5 text-sm text-right font-medium text-red-700">
+                                <td className={`px-3 py-1.5 text-sm text-right font-medium ${item.done ? 'text-gray-400' : 'text-red-700'}`}>
                                   {item.searches > 0 ? formatNumber(item.searches) : <span className="text-gray-300">-</span>}
                                 </td>
                                 <td className="px-2 py-1.5 text-right">
@@ -403,6 +430,7 @@ export default function CollectionsPage() {
                           </tbody>
                           <tfoot className="bg-gray-50 border-t border-gray-200">
                             <tr>
+                              <td></td>
                               <td></td>
                               <td className="px-3 py-2 text-xs font-medium text-gray-500">{collection.items.length} Keywords</td>
                               <td className="px-3 py-2 text-xs text-right font-medium text-gray-500">
