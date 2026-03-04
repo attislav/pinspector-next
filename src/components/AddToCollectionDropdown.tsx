@@ -3,14 +3,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { FolderPlus, Plus, Check } from 'lucide-react';
 import { useKeywordCollections } from '@/context/KeywordCollectionContext';
+import { KeywordCollectionItem } from '@/types/database';
 
 interface AddToCollectionDropdownProps {
-  keywords: string[];
+  items: KeywordCollectionItem[];
   label?: string;
 }
 
-export function AddToCollectionDropdown({ keywords, label }: AddToCollectionDropdownProps) {
-  const { collections, createCollection, addKeywords } = useKeywordCollections();
+export function AddToCollectionDropdown({ items, label }: AddToCollectionDropdownProps) {
+  const { collections, createCollection, addItems } = useKeywordCollections();
   const [open, setOpen] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState('');
@@ -35,21 +36,21 @@ export function AddToCollectionDropdown({ keywords, label }: AddToCollectionDrop
   }, [showNew]);
 
   const handleAddToExisting = (collectionId: string, collectionName: string) => {
-    addKeywords(collectionId, keywords);
-    setFeedback(`${keywords.length} Keywords zu "${collectionName}" hinzugefügt`);
+    addItems(collectionId, items);
+    setFeedback(`${items.length} Keywords zu "${collectionName}" hinzugefügt`);
     setTimeout(() => { setFeedback(null); setOpen(false); }, 1500);
   };
 
   const handleCreateNew = () => {
     if (!newName.trim()) return;
-    const collection = createCollection(newName.trim(), keywords);
-    setFeedback(`"${collection.name}" erstellt mit ${keywords.length} Keywords`);
+    const collection = createCollection(newName.trim(), items);
+    setFeedback(`"${collection.name}" erstellt mit ${items.length} Keywords`);
     setNewName('');
     setShowNew(false);
     setTimeout(() => { setFeedback(null); setOpen(false); }, 1500);
   };
 
-  if (keywords.length === 0) return null;
+  if (items.length === 0) return null;
 
   return (
     <div ref={dropdownRef} className="relative">
@@ -66,7 +67,7 @@ export function AddToCollectionDropdown({ keywords, label }: AddToCollectionDrop
         <div className="absolute top-full mt-1 right-0 w-72 bg-white rounded-lg shadow-xl border border-gray-200 z-50 overflow-hidden">
           <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
             <p className="text-xs text-gray-500 font-medium">
-              {keywords.length} Keyword{keywords.length !== 1 ? 's' : ''} hinzufügen zu:
+              {items.length} Keyword{items.length !== 1 ? 's' : ''} hinzufügen zu:
             </p>
           </div>
 
@@ -88,7 +89,7 @@ export function AddToCollectionDropdown({ keywords, label }: AddToCollectionDrop
                     >
                       <span className="text-sm text-gray-800 truncate">{c.name}</span>
                       <span className="text-xs text-gray-400 group-hover:text-amber-600 shrink-0 ml-2">
-                        {c.keywords.length} Keywords
+                        {c.items.length} Keywords
                       </span>
                     </button>
                   ))

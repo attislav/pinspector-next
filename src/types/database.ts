@@ -146,10 +146,15 @@ export interface FindInterestsResult {
 }
 
 // Keyword Collection (persisted in localStorage)
+export interface KeywordCollectionItem {
+  keyword: string;
+  searches: number;
+}
+
 export interface KeywordCollection {
   id: string;
   name: string;
-  keywords: string[];
+  items: KeywordCollectionItem[];
   createdAt: string;
   updatedAt: string;
 }
