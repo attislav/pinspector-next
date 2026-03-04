@@ -11,6 +11,8 @@ interface KeywordCollectionContextType {
   addItems: (collectionId: string, items: KeywordCollectionItem[]) => void;
   removeItem: (collectionId: string, keyword: string) => void;
   updateItems: (collectionId: string, items: KeywordCollectionItem[]) => void;
+  toggleItemDone: (collectionId: string, keyword: string) => void;
+  toggleItemsDone: (collectionId: string, keywords: string[], done: boolean) => void;
 }
 
 const STORAGE_KEY = 'pinspector-keyword-collections';
@@ -23,6 +25,8 @@ const KeywordCollectionContext = createContext<KeywordCollectionContextType>({
   addItems: () => {},
   removeItem: () => {},
   updateItems: () => {},
+  toggleItemDone: () => {},
+  toggleItemsDone: () => {},
 });
 
 function generateId(): string {
@@ -127,10 +131,27 @@ export function KeywordCollectionProvider({ children }: { children: ReactNode })
     ));
   }, []);
 
+  const toggleItemDone = useCallback((collectionId: string, keyword: string) => {
+    setCollections(prev => prev.map(c =>
+      c.id === collectionId
+        ? { ...c, items: c.items.map(i => i.keyword === keyword ? { ...i, done: !i.done } : i), updatedAt: new Date().toISOString() }
+        : c
+    ));
+  }, []);
+
+  const toggleItemsDone = useCallback((collectionId: string, keywords: string[], done: boolean) => {
+    const keywordSet = new Set(keywords);
+    setCollections(prev => prev.map(c =>
+      c.id === collectionId
+        ? { ...c, items: c.items.map(i => keywordSet.has(i.keyword) ? { ...i, done } : i), updatedAt: new Date().toISOString() }
+        : c
+    ));
+  }, []);
+
   return (
     <KeywordCollectionContext.Provider value={{
       collections, createCollection, deleteCollection, renameCollection,
-      addItems, removeItem, updateItems,
+      addItems, removeItem, updateItems, toggleItemDone, toggleItemsDone,
     }}>
       {children}
     </KeywordCollectionContext.Provider>
