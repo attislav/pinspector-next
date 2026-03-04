@@ -144,14 +144,14 @@ export default function InterestsPage() {
       setSelectedItems(prev => { const next = new Map(prev); ideas.forEach(idea => next.delete(idea.id)); return next; });
     } else {
       // Select all on current page (add to existing selection)
-      setSelectedItems(prev => { const next = new Map(prev); ideas.forEach(idea => next.set(idea.id, { keyword: idea.name, searches: idea.searches })); return next; });
+      setSelectedItems(prev => { const next = new Map(prev); ideas.forEach(idea => next.set(idea.id, { keyword: idea.name, searches: idea.searches, id: idea.id })); return next; });
     }
   };
   const toggleSelect = (id: string) => {
     setSelectedItems(prev => {
       const next = new Map(prev);
       if (next.has(id)) { next.delete(id); }
-      else { const idea = ideas.find(i => i.id === id); if (idea) next.set(id, { keyword: idea.name, searches: idea.searches }); }
+      else { const idea = ideas.find(i => i.id === id); if (idea) next.set(id, { keyword: idea.name, searches: idea.searches, id: idea.id }); }
       return next;
     });
   };

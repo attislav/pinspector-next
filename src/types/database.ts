@@ -149,6 +149,7 @@ export interface FindInterestsResult {
 export interface KeywordCollectionItem {
   keyword: string;
   searches: number;
+  id?: string; // Interest ID for linking to detail page
 }
 
 export interface KeywordCollection {

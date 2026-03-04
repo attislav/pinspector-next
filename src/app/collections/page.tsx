@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   Plus, Trash2, Copy, List, Download, Pencil, Check, X, FolderOpen, ChevronDown, ChevronRight,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ export default function CollectionsPage() {
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [editingKeywordsId, setEditingKeywordsId] = useState<string | null>(null);
   const [bulkText, setBulkText] = useState('');
+  const [selectedKeywords, setSelectedKeywords] = useState<Set<string>>(new Set());
 
   const handleCreate = () => {
     if (!newCollectionName.trim()) return;
@@ -43,11 +45,28 @@ export default function CollectionsPage() {
     setNewKeyword('');
   };
 
+  const showCopyFeedback = (msg: string) => {
+    setCopyFeedback(msg);
+    setTimeout(() => setCopyFeedback(null), 2000);
+  };
+
   const handleCopy = async (items: KeywordCollectionItem[], asList: boolean) => {
     const text = asList ? items.map(i => i.keyword).join('\n') : items.map(i => i.keyword).join(', ');
     await navigator.clipboard.writeText(text);
-    setCopyFeedback(asList ? 'Liste kopiert!' : 'Kommaliste kopiert!');
-    setTimeout(() => setCopyFeedback(null), 2000);
+    showCopyFeedback(asList ? 'Liste kopiert!' : 'Kommaliste kopiert!');
+  };
+
+  const handleCopySingle = async (keyword: string) => {
+    await navigator.clipboard.writeText(keyword);
+    showCopyFeedback(`"${keyword}" kopiert!`);
+  };
+
+  const handleCopySelected = async (items: KeywordCollectionItem[], asList: boolean) => {
+    const selected = items.filter(i => selectedKeywords.has(i.keyword));
+    if (selected.length === 0) return;
+    const text = asList ? selected.map(i => i.keyword).join('\n') : selected.map(i => i.keyword).join(', ');
+    await navigator.clipboard.writeText(text);
+    showCopyFeedback(`${selected.length} Keywords kopiert!`);
   };
 
   const handleExport = (name: string, items: KeywordCollectionItem[]) => {
@@ -83,6 +102,25 @@ export default function CollectionsPage() {
     setBulkText('');
   };
 
+  const toggleKeyword = (keyword: string) => {
+    setSelectedKeywords(prev => {
+      const next = new Set(prev);
+      next.has(keyword) ? next.delete(keyword) : next.add(keyword);
+      return next;
+    });
+  };
+
+  const toggleAllKeywords = (items: KeywordCollectionItem[]) => {
+    const allSelected = items.every(i => selectedKeywords.has(i.keyword));
+    if (allSelected) {
+      setSelectedKeywords(prev => { const next = new Set(prev); items.forEach(i => next.delete(i.keyword)); return next; });
+    } else {
+      setSelectedKeywords(prev => { const next = new Set(prev); items.forEach(i => next.add(i.keyword)); return next; });
+    }
+  };
+
+  const selectedCountFor = (items: KeywordCollectionItem[]) => items.filter(i => selectedKeywords.has(i.keyword)).length;
+
   const totalKeywords = collections.reduce((sum, c) => sum + c.items.length, 0);
 
   return (
@@ -97,8 +135,8 @@ export default function CollectionsPage() {
       </div>
 
       {copyFeedback && (
-        <div className="mb-4">
-          <span className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm animate-pulse">{copyFeedback}</span>
+        <div className="fixed top-4 right-4 z-50">
+          <span className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm shadow-lg">{copyFeedback}</span>
         </div>
       )}
 
@@ -135,13 +173,14 @@ export default function CollectionsPage() {
             const isExpanded = expandedId === collection.id;
             const isEditing = editingId === collection.id;
             const isBulkEditing = editingKeywordsId === collection.id;
+            const selCount = selectedCountFor(collection.items);
 
             return (
               <div key={collection.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 {/* Header */}
                 <div
                   className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
-                  onClick={() => setExpandedId(isExpanded ? null : collection.id)}
+                  onClick={() => { setExpandedId(isExpanded ? null : collection.id); setSelectedKeywords(new Set()); }}
                 >
                   {isExpanded ? <ChevronDown className="w-5 h-5 text-gray-400 shrink-0" /> : <ChevronRight className="w-5 h-5 text-gray-400 shrink-0" />}
 
@@ -179,7 +218,7 @@ export default function CollectionsPage() {
                       onClick={() => handleCopy(collection.items, false)}
                       disabled={collection.items.length === 0}
                       className="p-1.5 text-gray-400 hover:text-green-700 hover:bg-green-50 rounded transition-colors disabled:opacity-30"
-                      title="Als Kommaliste kopieren"
+                      title="Alle als Kommaliste kopieren"
                     >
                       <Copy className="w-4 h-4" />
                     </button>
@@ -187,7 +226,7 @@ export default function CollectionsPage() {
                       onClick={() => handleCopy(collection.items, true)}
                       disabled={collection.items.length === 0}
                       className="p-1.5 text-gray-400 hover:text-green-700 hover:bg-green-50 rounded transition-colors disabled:opacity-30"
-                      title="Als Liste kopieren"
+                      title="Alle als Liste kopieren"
                     >
                       <List className="w-4 h-4" />
                     </button>
@@ -220,7 +259,7 @@ export default function CollectionsPage() {
                 {isExpanded && (
                   <div className="border-t border-gray-200 px-4 py-3">
                     {/* Action bar */}
-                    <div className="flex gap-2 mb-3">
+                    <div className="flex flex-wrap gap-2 mb-3">
                       {addingKeywordId === collection.id ? (
                         <form
                           onSubmit={(e) => { e.preventDefault(); handleAddKeyword(collection.id); }}
@@ -265,6 +304,22 @@ export default function CollectionsPage() {
                               Abbrechen
                             </button>
                           )}
+                          {selCount > 0 && (
+                            <>
+                              <button
+                                onClick={() => handleCopySelected(collection.items, false)}
+                                className="flex items-center gap-1 px-3 py-1.5 text-sm text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+                              >
+                                <Copy className="w-3.5 h-3.5" /> {selCount} als Kommaliste
+                              </button>
+                              <button
+                                onClick={() => handleCopySelected(collection.items, true)}
+                                className="flex items-center gap-1 px-3 py-1.5 text-sm text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+                              >
+                                <List className="w-3.5 h-3.5" /> {selCount} als Liste
+                              </button>
+                            </>
+                          )}
                         </>
                       )}
                     </div>
@@ -289,32 +344,66 @@ export default function CollectionsPage() {
                         <table className="w-full">
                           <thead className="bg-gray-50 border-b border-gray-200">
                             <tr>
+                              <th className="px-2 py-2 w-8">
+                                <input
+                                  type="checkbox"
+                                  checked={collection.items.length > 0 && collection.items.every(i => selectedKeywords.has(i.keyword))}
+                                  onChange={() => toggleAllKeywords(collection.items)}
+                                  className="rounded border-gray-300"
+                                />
+                              </th>
                               <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Keyword</th>
                               <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Searches</th>
-                              <th className="px-3 py-2 w-10"></th>
+                              <th className="px-2 py-2 w-20"></th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                             {collection.items.map((item, idx) => (
-                              <tr key={`${item.keyword}-${idx}`} className="hover:bg-gray-50 group">
-                                <td className="px-3 py-1.5 text-sm text-gray-800">{item.keyword}</td>
+                              <tr key={`${item.keyword}-${idx}`} className="hover:bg-gray-50">
+                                <td className="px-2 py-1.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedKeywords.has(item.keyword)}
+                                    onChange={() => toggleKeyword(item.keyword)}
+                                    className="rounded border-gray-300"
+                                  />
+                                </td>
+                                <td className="px-3 py-1.5 text-sm">
+                                  {item.id ? (
+                                    <Link href={`/interests/${item.id}`} className="text-red-700 hover:text-red-900 hover:underline">
+                                      {item.keyword}
+                                    </Link>
+                                  ) : (
+                                    <span className="text-gray-800">{item.keyword}</span>
+                                  )}
+                                </td>
                                 <td className="px-3 py-1.5 text-sm text-right font-medium text-red-700">
                                   {item.searches > 0 ? formatNumber(item.searches) : <span className="text-gray-300">-</span>}
                                 </td>
-                                <td className="px-2 py-1.5">
-                                  <button
-                                    onClick={() => removeItem(collection.id, item.keyword)}
-                                    className="p-1 text-gray-300 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100"
-                                    title="Entfernen"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
+                                <td className="px-2 py-1.5 text-right">
+                                  <div className="flex items-center justify-end gap-0.5">
+                                    <button
+                                      onClick={() => handleCopySingle(item.keyword)}
+                                      className="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                                      title="Keyword kopieren"
+                                    >
+                                      <Copy className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => removeItem(collection.id, item.keyword)}
+                                      className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                      title="Entfernen"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
                           </tbody>
                           <tfoot className="bg-gray-50 border-t border-gray-200">
                             <tr>
+                              <td></td>
                               <td className="px-3 py-2 text-xs font-medium text-gray-500">{collection.items.length} Keywords</td>
                               <td className="px-3 py-2 text-xs text-right font-medium text-gray-500">
                                 {formatNumber(collection.items.reduce((sum, i) => sum + i.searches, 0))} total
