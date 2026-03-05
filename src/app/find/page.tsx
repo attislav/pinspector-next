@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Search, Loader2, ExternalLink, Plus, Check, X } from 'lucide-react';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface FoundUrl {
   url: string;
@@ -13,6 +14,7 @@ interface FoundUrl {
 }
 
 export default function FindPage() {
+  const { language } = useLanguage();
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
   const [foundUrls, setFoundUrls] = useState<FoundUrl[]>([]);
@@ -30,7 +32,7 @@ export default function FindPage() {
       const response = await fetch('/api/find-interests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: keyword.trim() }),
+        body: JSON.stringify({ keyword: keyword.trim(), language: language || undefined }),
       });
 
       const data = await response.json();
@@ -106,6 +108,13 @@ export default function FindPage() {
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Neue Interests finden</h1>
         <p className="text-gray-600">
           Suche nach Pinterest Ideas zu einem Keyword über Google und scrape sie automatisch.
+          {language ? (
+            <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700 uppercase">
+              {language}
+            </span>
+          ) : (
+            <span className="ml-1 text-gray-400 text-sm">(alle Sprachen)</span>
+          )}
         </p>
       </div>
 
