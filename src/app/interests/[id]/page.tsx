@@ -224,6 +224,10 @@ export default function IdeaDetailPage() {
         onExtract={detail.extractKeywordsFromTitles}
         onCopyKeywords={detail.copyExtractedKeywords}
         existingNames={detail.existingNames}
+        analyzingImages={detail.analyzingImages}
+        imageAnalysis={detail.imageAnalysis}
+        onAnalyzeImages={detail.analyzePinImages}
+        onClearImageAnalysis={() => detail.setImageAnalysis(null)}
       />
 
       {/* History Table */}
