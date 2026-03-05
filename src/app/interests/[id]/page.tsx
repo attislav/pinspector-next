@@ -228,6 +228,9 @@ export default function IdeaDetailPage() {
         imageAnalysis={detail.imageAnalysis}
         onAnalyzeImages={detail.analyzePinImages}
         onClearImageAnalysis={() => detail.setImageAnalysis(null)}
+        generatingPromptForPin={detail.generatingPromptForPin}
+        imagePrompts={detail.imagePrompts}
+        onGenerateImagePrompt={detail.generateImagePrompt}
       />
 
       {/* History Table */}

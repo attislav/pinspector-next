@@ -57,6 +57,7 @@ REGELN:
 - Die Beschreibung muss als H2/H3 Heading in einem Blogartikel funktionieren
 - Keine ganzen Sätze, nur Heading-Stil (z.B. "Weißes Leinenkleid mit Strohhut", "Minimalistischer Holztisch mit Kerzen")
 - Sei spezifisch: Farben, Materialien, Stil, Details nennen
+- ÜBERSPRINGE Bilder die keinen visuellen Mehrwert haben: reine Textbilder, Infografiken, Collagen mit überwiegend Text, Screenshots, Listenbilder. Für solche Pins setze heading auf null.
 - Antworte NUR im JSON-Format`,
           },
           {
@@ -65,7 +66,8 @@ REGELN:
               {
                 type: 'text',
                 text: `Analysiere diese ${validPins.length} Top-Pins für "${keyword}". Antworte als JSON-Array:
-[{"position": 1, "heading": "Kurze Heading-Beschreibung"}, ...]`,
+[{"position": 1, "heading": "Kurze Heading-Beschreibung"}, ...]
+Setze heading auf null für Textbilder/Infografiken/Screenshots ohne echten visuellen Content.`,
               },
               ...imageContent,
             ],
@@ -92,7 +94,8 @@ REGELN:
     let results: { position: number; heading: string }[];
     try {
       const parsed = JSON.parse(content);
-      results = Array.isArray(parsed) ? parsed : parsed.results || parsed.pins || parsed.headings || [];
+      const raw: { position: number; heading: string | null }[] = Array.isArray(parsed) ? parsed : parsed.results || parsed.pins || parsed.headings || [];
+      results = raw.filter((r): r is { position: number; heading: string } => r.heading != null && r.heading.trim() !== '');
     } catch {
       console.error('Failed to parse vision response:', content);
       return NextResponse.json({ error: 'Fehler beim Parsen der Antwort' }, { status: 500 });

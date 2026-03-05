@@ -1,10 +1,11 @@
 'use client';
 
+import React, { useState } from 'react';
 import {
   ExternalLink, ImageIcon, FileText, Loader2,
   ArrowUpDown, ArrowUp, ArrowDown,
   Pin as PinIcon, Heart, Repeat2, MessageCircle,
-  X, Wand2, Lightbulb, Check, Copy, Eye,
+  X, Wand2, Lightbulb, Check, Copy, Eye, Sparkles,
 } from 'lucide-react';
 import { formatNumber, formatPinDate } from '@/lib/format';
 import { Pin } from '@/types/database';
@@ -40,6 +41,10 @@ interface PinsTableProps {
   imageAnalysis: Map<number, string> | null;
   onAnalyzeImages: () => void;
   onClearImageAnalysis: () => void;
+  // Image prompt generation
+  generatingPromptForPin: string | null;
+  imagePrompts: Map<string, string>;
+  onGenerateImagePrompt: (pinId: string, imageUrl: string) => void;
 }
 
 function SortIcon({ column, sortBy, sortOrder }: { column: PinSortKey; sortBy: PinSortKey | null; sortOrder: 'asc' | 'desc' }) {
@@ -55,7 +60,9 @@ export function PinsTable({
   extractingKeywords, extractedKeywords, keywordsCopied, onExtract, onCopyKeywords,
   existingNames,
   analyzingImages, imageAnalysis, onAnalyzeImages, onClearImageAnalysis,
+  generatingPromptForPin, imagePrompts, onGenerateImagePrompt,
 }: PinsTableProps) {
+  const [promptCopied, setPromptCopied] = useState<string | null>(null);
   if (sortedPins.length === 0) return null;
 
   return (
@@ -181,7 +188,8 @@ export function PinsTable({
           </thead>
           <tbody>
             {sortedPins.map((pin) => (
-              <tr key={pin.id} className="border-b border-gray-100 hover:bg-gray-50">
+              <React.Fragment key={pin.id}>
+              <tr className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="py-2 px-2 text-center"><span className="inline-flex items-center justify-center w-6 h-6 bg-red-100 text-red-700 rounded-full text-xs font-bold">{pin.originalPosition}</span></td>
                 <td className="py-2 px-2">
                   <div className="flex items-center gap-2">
@@ -225,11 +233,51 @@ export function PinsTable({
                 <td className="py-2 px-2 text-right text-gray-900 font-medium">{formatNumber(pin.comment_count)}</td>
                 <td className="py-2 px-2">
                   <div className="flex items-center justify-center gap-2">
+                    {pin.image_url && (
+                      <button
+                        onClick={() => onGenerateImagePrompt(pin.id, pin.image_url!)}
+                        disabled={generatingPromptForPin !== null}
+                        className={`transition-colors disabled:opacity-50 ${imagePrompts.has(pin.id) ? 'text-fuchsia-600 hover:text-fuchsia-800' : 'text-fuchsia-400 hover:text-fuchsia-600'}`}
+                        title="Bild-Prompt generieren"
+                      >
+                        {generatingPromptForPin === pin.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                      </button>
+                    )}
                     {pin.link && <a href={pin.link} target="_blank" rel="noopener noreferrer" className="text-red-600 hover:text-red-800" title="Pin auf Pinterest öffnen"><ExternalLink className="w-4 h-4" /></a>}
                     {pin.article_url && <a href={pin.article_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800" title="Artikel öffnen"><FileText className="w-4 h-4" /></a>}
                   </div>
                 </td>
               </tr>
+              {/* Image Prompt Row */}
+              {imagePrompts.has(pin.id) && (
+                <tr className="bg-fuchsia-50 border-b border-fuchsia-100">
+                  <td colSpan={13} className="py-2 px-4">
+                    <div className="flex items-start gap-3">
+                      <Sparkles className="w-4 h-4 text-fuchsia-500 mt-0.5 flex-shrink-0" />
+                      <p className="text-sm text-gray-800 flex-1 font-mono leading-relaxed">{imagePrompts.get(pin.id)}</p>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(imagePrompts.get(pin.id) || '');
+                          setPromptCopied(pin.id);
+                          setTimeout(() => setPromptCopied(null), 2000);
+                        }}
+                        className="flex-shrink-0 text-fuchsia-500 hover:text-fuchsia-700 transition-colors"
+                        title="Prompt kopieren"
+                      >
+                        {promptCopied === pin.id ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={() => onGenerateImagePrompt(pin.id, pin.image_url!)}
+                        className="flex-shrink-0 text-fuchsia-400 hover:text-fuchsia-600 transition-colors"
+                        title="Prompt schließen"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>
@@ -253,6 +301,12 @@ export function PinsTable({
                 <div className="flex items-start justify-between gap-2">
                   <span className="inline-flex items-center justify-center w-5 h-5 bg-red-100 text-red-700 rounded-full text-xs font-bold">{pin.originalPosition}</span>
                   <div className="flex gap-1.5">
+                    {pin.image_url && (
+                      <button onClick={() => onGenerateImagePrompt(pin.id, pin.image_url!)} disabled={generatingPromptForPin !== null}
+                        className={`disabled:opacity-50 ${imagePrompts.has(pin.id) ? 'text-fuchsia-600' : 'text-fuchsia-400'}`} title="Bild-Prompt">
+                        {generatingPromptForPin === pin.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                      </button>
+                    )}
                     {pin.link && <a href={pin.link} target="_blank" rel="noopener noreferrer" className="text-red-600"><ExternalLink className="w-4 h-4" /></a>}
                     {pin.article_url && <a href={pin.article_url} target="_blank" rel="noopener noreferrer" className="text-blue-600"><FileText className="w-4 h-4" /></a>}
                   </div>
@@ -284,6 +338,20 @@ export function PinsTable({
                   );
                 })}
                 {pin.annotations.length > 5 && <span className="text-xs text-gray-400">+{pin.annotations.length - 5}</span>}
+              </div>
+            )}
+            {imagePrompts.has(pin.id) && (
+              <div className="mt-2 p-2 bg-fuchsia-50 border border-fuchsia-100 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <p className="text-xs text-gray-800 flex-1 font-mono leading-relaxed">{imagePrompts.get(pin.id)}</p>
+                  <button onClick={() => { navigator.clipboard.writeText(imagePrompts.get(pin.id) || ''); setPromptCopied(pin.id); setTimeout(() => setPromptCopied(null), 2000); }}
+                    className="flex-shrink-0 text-fuchsia-500">
+                    {promptCopied === pin.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                  <button onClick={() => onGenerateImagePrompt(pin.id, pin.image_url!)} className="flex-shrink-0 text-fuchsia-400">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             )}
           </div>
