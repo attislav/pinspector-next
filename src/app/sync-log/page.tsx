@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, CheckCircle, XCircle, Clock, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { RefreshCw, CheckCircle, XCircle, Clock, ExternalLink, ChevronDown, ChevronUp, StopCircle } from 'lucide-react';
 import Link from 'next/link';
 
 interface SyncLogEntry {
@@ -73,6 +73,17 @@ export default function SyncLogPage() {
     } catch { /* ignore */ }
     setLoading(false);
   }, []);
+
+  const cancelRunning = async (logId: number) => {
+    try {
+      await fetch('/api/sync-logs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: logId }),
+      });
+      fetchLogs();
+    } catch { /* ignore */ }
+  };
 
   useEffect(() => {
     fetchLogs();
@@ -209,7 +220,18 @@ export default function SyncLogPage() {
                         )}
                       </td>
                       <td className="py-2.5 px-4 text-center">
-                        <StatusBadge status={log.status} />
+                        <div className="flex items-center justify-center gap-1">
+                          <StatusBadge status={log.status} />
+                          {log.status === 'running' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); cancelRunning(log.id); }}
+                              className="p-0.5 text-red-400 hover:text-red-600 transition-colors"
+                              title="Abbrechen"
+                            >
+                              <StopCircle className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2.5 px-4 text-xs text-right text-gray-500">
                         {formatDuration(log.started_at, log.completed_at)}
@@ -243,7 +265,18 @@ export default function SyncLogPage() {
               <div key={log.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-gray-500">{formatDateTime(log.started_at)}</span>
-                  <StatusBadge status={log.status} />
+                  <div className="flex items-center gap-1">
+                    <StatusBadge status={log.status} />
+                    {log.status === 'running' && (
+                      <button
+                        onClick={() => cancelRunning(log.id)}
+                        className="p-0.5 text-red-400 hover:text-red-600 transition-colors"
+                        title="Abbrechen"
+                      >
+                        <StopCircle className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {log.idea_id ? (
                   <Link href={`/interests/${log.idea_id}`} className="text-sm font-medium text-red-700 hover:underline block mb-2">
