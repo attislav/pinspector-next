@@ -43,6 +43,8 @@ export function useIdeaDetail(id: string) {
   const [existingNames, setExistingNames] = useState<Set<string>>(new Set());
   const [analyzingImages, setAnalyzingImages] = useState(false);
   const [imageAnalysis, setImageAnalysis] = useState<Map<number, string> | null>(null);
+  const [generatingPromptForPin, setGeneratingPromptForPin] = useState<string | null>(null);
+  const [imagePrompts, setImagePrompts] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (id) fetchData();
@@ -528,6 +530,30 @@ export function useIdeaDetail(id: string) {
     finally { setAnalyzingImages(false); }
   };
 
+  const generateImagePrompt = async (pinId: string, imageUrl: string) => {
+    if (!imageUrl || generatingPromptForPin) return;
+    // If we already have a prompt for this pin, just toggle it off
+    if (imagePrompts.has(pinId)) {
+      setImagePrompts(prev => { const next = new Map(prev); next.delete(pinId); return next; });
+      return;
+    }
+    setGeneratingPromptForPin(pinId);
+    try {
+      const response = await fetchWithTimeout('/api/generate-image-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+      });
+      const data = await response.json();
+      if (data.success && data.prompt) {
+        setImagePrompts(prev => new Map(prev).set(pinId, data.prompt));
+      } else {
+        alert(data.error || 'Fehler bei der Prompt-Generierung');
+      }
+    } catch { alert('Fehler bei der Prompt-Generierung'); }
+    finally { setGeneratingPromptForPin(null); }
+  };
+
   const parseAnnotations = (html: string) => {
     const regex = /<a[^>]*>([^<]*)<\/a>\s*\((\d+)\)/g;
     const annotations: { name: string; count: number }[] = [];
@@ -547,6 +573,7 @@ export function useIdeaDetail(id: string) {
     extractingKeywords, extractedKeywords, extractKeywordsFromTitles, keywordsCopied, copyExtractedKeywords,
     analyzingContent, contentAnalysis, setContentAnalysis, analyzeContentStrategy,
     analyzingImages, imageAnalysis, setImageAnalysis, analyzePinImages,
+    generatingPromptForPin, imagePrompts, generateImagePrompt,
     klpPivotsCopied, copyKlpPivots,
     relatedInterestsCopied, copyRelatedInterests,
     allKwsCopied, copyAllKeywords,
