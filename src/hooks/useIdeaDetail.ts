@@ -41,6 +41,8 @@ export function useIdeaDetail(id: string) {
   const [copyMenuOpen, setCopyMenuOpen] = useState<CopyMenuType>(null);
   const [existingIds, setExistingIds] = useState<Set<string>>(new Set());
   const [existingNames, setExistingNames] = useState<Set<string>>(new Set());
+  const [analyzingImages, setAnalyzingImages] = useState(false);
+  const [imageAnalysis, setImageAnalysis] = useState<Map<number, string> | null>(null);
 
   useEffect(() => {
     if (id) fetchData();
@@ -501,6 +503,31 @@ export function useIdeaDetail(id: string) {
     finally { setRescraping(false); }
   };
 
+  const analyzePinImages = async () => {
+    if (!idea || pins.length === 0) return;
+    const pinsWithImages = pins
+      .map((pin, idx) => ({ position: idx + 1, imageUrl: pin.image_url, title: pin.title }))
+      .filter(p => p.imageUrl);
+    if (pinsWithImages.length === 0) { alert('Keine Pins mit Bildern gefunden'); return; }
+    setAnalyzingImages(true); setImageAnalysis(null);
+    try {
+      const response = await fetchWithTimeout('/api/analyze-pin-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: idea.name, pins: pinsWithImages.slice(0, 10) }),
+      });
+      const data = await response.json();
+      if (data.success && data.results) {
+        const map = new Map<number, string>();
+        for (const r of data.results) map.set(r.position, r.heading);
+        setImageAnalysis(map);
+      } else {
+        alert(data.error || 'Fehler bei der Bildanalyse');
+      }
+    } catch { alert('Fehler bei der Bildanalyse'); }
+    finally { setAnalyzingImages(false); }
+  };
+
   const parseAnnotations = (html: string) => {
     const regex = /<a[^>]*>([^<]*)<\/a>\s*\((\d+)\)/g;
     const annotations: { name: string; count: number }[] = [];
@@ -519,6 +546,7 @@ export function useIdeaDetail(id: string) {
     scrapingAllAnnotations, annotationProgress, scrapeAllAnnotations,
     extractingKeywords, extractedKeywords, extractKeywordsFromTitles, keywordsCopied, copyExtractedKeywords,
     analyzingContent, contentAnalysis, setContentAnalysis, analyzeContentStrategy,
+    analyzingImages, imageAnalysis, setImageAnalysis, analyzePinImages,
     klpPivotsCopied, copyKlpPivots,
     relatedInterestsCopied, copyRelatedInterests,
     allKwsCopied, copyAllKeywords,

@@ -4,7 +4,7 @@ import {
   ExternalLink, ImageIcon, FileText, Loader2,
   ArrowUpDown, ArrowUp, ArrowDown,
   Pin as PinIcon, Heart, Repeat2, MessageCircle,
-  X, Wand2, Lightbulb, Check, Copy,
+  X, Wand2, Lightbulb, Check, Copy, Eye,
 } from 'lucide-react';
 import { formatNumber, formatPinDate } from '@/lib/format';
 import { Pin } from '@/types/database';
@@ -35,6 +35,11 @@ interface PinsTableProps {
   onExtract: () => void;
   onCopyKeywords: () => void;
   existingNames?: Set<string>;
+  // Vision analysis
+  analyzingImages: boolean;
+  imageAnalysis: Map<number, string> | null;
+  onAnalyzeImages: () => void;
+  onClearImageAnalysis: () => void;
 }
 
 function SortIcon({ column, sortBy, sortOrder }: { column: PinSortKey; sortBy: PinSortKey | null; sortOrder: 'asc' | 'desc' }) {
@@ -49,6 +54,7 @@ export function PinsTable({
   ideaName, analyzingContent, contentAnalysis, onAnalyze, onClearAnalysis,
   extractingKeywords, extractedKeywords, keywordsCopied, onExtract, onCopyKeywords,
   existingNames,
+  analyzingImages, imageAnalysis, onAnalyzeImages, onClearImageAnalysis,
 }: PinsTableProps) {
   if (sortedPins.length === 0) return null;
 
@@ -69,6 +75,11 @@ export function PinsTable({
             className="flex items-center gap-2 px-3 py-1.5 bg-green-100 text-green-700 hover:bg-green-200 rounded-lg transition-colors disabled:opacity-50 text-sm">
             {extractingKeywords ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
             {extractingKeywords ? 'Extrahiere...' : 'Keywords extrahieren'}
+          </button>
+          <button onClick={onAnalyzeImages} disabled={analyzingImages}
+            className="flex items-center gap-2 px-3 py-1.5 bg-amber-100 text-amber-700 hover:bg-amber-200 rounded-lg transition-colors disabled:opacity-50 text-sm">
+            {analyzingImages ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+            {analyzingImages ? 'Analysiere Bilder...' : 'Bilder analysieren'}
           </button>
         </div>
       </div>
@@ -112,6 +123,29 @@ export function PinsTable({
         </div>
       )}
 
+      {/* Image Analysis Results */}
+      {imageAnalysis && (
+        <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-amber-700 font-medium flex items-center gap-2">
+              <Eye className="w-4 h-4" />
+              Bild-Analyse für &quot;{ideaName}&quot;
+            </span>
+            <button onClick={onClearImageAnalysis} className="text-amber-400 hover:text-amber-600"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="grid gap-2">
+            {Array.from(imageAnalysis.entries())
+              .sort(([a], [b]) => a - b)
+              .map(([position, heading]) => (
+                <div key={position} className="flex items-center gap-3">
+                  <span className="inline-flex items-center justify-center w-6 h-6 bg-amber-200 text-amber-800 rounded-full text-xs font-bold flex-shrink-0">{position}</span>
+                  <span className="text-sm text-gray-800 font-medium">{heading}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Hover Preview Tooltip */}
       {hoveredPin && (
         <div className="fixed z-40 pointer-events-none hidden md:block" style={{
@@ -150,12 +184,17 @@ export function PinsTable({
               <tr key={pin.id} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="py-2 px-2 text-center"><span className="inline-flex items-center justify-center w-6 h-6 bg-red-100 text-red-700 rounded-full text-xs font-bold">{pin.originalPosition}</span></td>
                 <td className="py-2 px-2">
-                  <div className="w-12 h-16 bg-gray-100 rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-red-400 transition-all"
-                    onClick={() => onImageClick(pin.image_url)}
-                    onMouseEnter={(e) => { onPinHover(pin); document.documentElement.style.setProperty('--mouse-x', `${e.clientX}px`); document.documentElement.style.setProperty('--mouse-y', `${e.clientY}px`); }}
-                    onMouseMove={(e) => { document.documentElement.style.setProperty('--mouse-x', `${e.clientX}px`); document.documentElement.style.setProperty('--mouse-y', `${e.clientY}px`); }}
-                    onMouseLeave={() => onPinHover(null)}>
-                    {(pin.image_thumbnail_url || pin.image_url) ? <img src={pin.image_thumbnail_url || pin.image_url || ''} alt={pin.title || 'Pin'} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-4 h-4 text-gray-400" /></div>}
+                  <div className="flex items-center gap-2">
+                    <div className="w-12 h-16 bg-gray-100 rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-red-400 transition-all flex-shrink-0"
+                      onClick={() => onImageClick(pin.image_url)}
+                      onMouseEnter={(e) => { onPinHover(pin); document.documentElement.style.setProperty('--mouse-x', `${e.clientX}px`); document.documentElement.style.setProperty('--mouse-y', `${e.clientY}px`); }}
+                      onMouseMove={(e) => { document.documentElement.style.setProperty('--mouse-x', `${e.clientX}px`); document.documentElement.style.setProperty('--mouse-y', `${e.clientY}px`); }}
+                      onMouseLeave={() => onPinHover(null)}>
+                      {(pin.image_thumbnail_url || pin.image_url) ? <img src={pin.image_thumbnail_url || pin.image_url || ''} alt={pin.title || 'Pin'} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-4 h-4 text-gray-400" /></div>}
+                    </div>
+                    {imageAnalysis?.get(pin.originalPosition) && (
+                      <span className="text-xs text-amber-700 font-medium leading-tight max-w-[120px]">{imageAnalysis.get(pin.originalPosition)}</span>
+                    )}
                   </div>
                 </td>
                 <td className="py-2 px-2 max-w-[180px]"><span className="line-clamp-2 text-gray-900 cursor-help" title={pin.title || ''}>{pin.title || '-'}</span></td>
@@ -201,9 +240,14 @@ export function PinsTable({
         {sortedPins.map((pin) => (
           <div key={pin.id} className="border border-gray-200 rounded-lg p-3">
             <div className="flex gap-3">
-              <div className="w-16 h-20 bg-gray-100 rounded overflow-hidden flex-shrink-0 cursor-pointer"
-                onClick={() => onImageClick(pin.image_url)}>
-                {(pin.image_thumbnail_url || pin.image_url) ? <img src={pin.image_thumbnail_url || pin.image_url || ''} alt={pin.title || 'Pin'} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-4 h-4 text-gray-400" /></div>}
+              <div className="flex-shrink-0">
+                <div className="w-16 h-20 bg-gray-100 rounded overflow-hidden cursor-pointer"
+                  onClick={() => onImageClick(pin.image_url)}>
+                  {(pin.image_thumbnail_url || pin.image_url) ? <img src={pin.image_thumbnail_url || pin.image_url || ''} alt={pin.title || 'Pin'} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-4 h-4 text-gray-400" /></div>}
+                </div>
+                {imageAnalysis?.get(pin.originalPosition) && (
+                  <p className="text-xs text-amber-700 font-medium mt-1 max-w-[64px] leading-tight">{imageAnalysis.get(pin.originalPosition)}</p>
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
