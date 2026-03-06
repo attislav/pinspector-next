@@ -32,7 +32,7 @@ export async function searchGoogle(query: string, maxResults: number = 20, optio
   const depth = Math.max(30, Math.ceil(maxResults / 10) * 10);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
     const response = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
@@ -86,7 +86,7 @@ export async function searchGoogle(query: string, maxResults: number = 20, optio
     return results;
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('DataForSEO Zeitüberschreitung (20s)');
+      throw new Error('DataForSEO Zeitüberschreitung (30s)');
     }
     throw error;
   } finally {

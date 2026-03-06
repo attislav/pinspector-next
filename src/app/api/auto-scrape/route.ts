@@ -550,9 +550,10 @@ export async function POST(request: NextRequest) {
       } catch (searchError) {
         const message = searchError instanceof Error ? searchError.message : 'Search error';
         return NextResponse.json({
-          success: false,
-          error: `Discovery search failed: ${message}`,
-        }, { status: 500 });
+          success: true,
+          discovery: { searched: true, found: false, error: message },
+          message: `Discovery search failed: ${message}`,
+        });
       }
     }
 
