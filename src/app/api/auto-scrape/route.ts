@@ -407,7 +407,7 @@ export async function POST(request: NextRequest) {
     const language: string = body.language || 'de';
     const minAgeDays: number = body.minAgeDays || 30;
     const maxAnnotations: number = Math.min(body.maxAnnotations || 50, 100);
-    const maxIdeas: number = Math.min(body.maxIdeas || 3, 20);
+    const maxIdeas: number = Math.min(body.maxIdeas || 10, 20);
     const scrapeRelated: boolean = body.scrapeRelated !== false;
     const kw: string | null = body.kw || null;
     const newKw: boolean = body.newKw === true;
@@ -495,46 +495,67 @@ export async function POST(request: NextRequest) {
         const logId = logEntry.id;
         const scrapeOptions: ScrapeOptions = { newKw, kwOnly, kwExclude };
 
-        // Scrape ALL discovered ideas in background
+        // Scrape discovered ideas in background, in parallel batches of 3
+        const concurrency = 3;
         after(async () => {
           const totalStats = { total: 0, scraped: 0, newCreated: 0, existingUpdated: 0, failed: 0 };
           let ideasScraped = 0;
           let ideasFailed = 0;
 
           try {
-            await appendDebugLog(logId, `[DISCOVERY] No candidates found. Discovered ${discoveredList.length} new ideas via Google for "${kw}"`);
+            await appendDebugLog(logId, `[DISCOVERY] No candidates found. Discovered ${discoveredList.length} new ideas via Google for "${kw}" (parallel=${concurrency})`);
             await appendDebugLog(logId, `Options: newKw=${newKw}, kwOnly=${kwOnly || 'none'}, kwExclude=${kwExclude || 'none'}, maxAnnotations=${maxAnnotations}`);
 
-            for (let i = 0; i < discoveredList.length; i++) {
-              const discovered = discoveredList[i];
-              await appendDebugLog(logId, `--- Idea ${i + 1}/${discoveredList.length}: "${discovered.title}" (${discovered.url})`);
+            // Process in parallel batches
+            for (let batchStart = 0; batchStart < discoveredList.length; batchStart += concurrency) {
+              const batch = discoveredList.slice(batchStart, batchStart + concurrency);
+              await appendDebugLog(logId, `=== Batch ${Math.floor(batchStart / concurrency) + 1}: ideas ${batchStart + 1}-${batchStart + batch.length} of ${discoveredList.length}`);
 
-              try {
-                const scrapeResult = await scrapePinterestIdea(discovered.url, {
-                  acceptLanguage: langConfig.acceptLanguage,
-                  pinterestDomain: langConfig.pinterestDomain,
-                  language: langConfig.languageCode,
-                });
+              const batchResults = await Promise.allSettled(
+                batch.map(async (discovered, idx) => {
+                  const ideaNum = batchStart + idx + 1;
+                  await appendDebugLog(logId, `--- Idea ${ideaNum}/${discoveredList.length}: "${discovered.title}" (${discovered.url})`);
 
-                if (!scrapeResult.success || !scrapeResult.idea) {
-                  await appendDebugLog(logId, `FAIL: "${discovered.title}" - ${scrapeResult.error}`);
+                  const scrapeResult = await scrapePinterestIdea(discovered.url, {
+                    acceptLanguage: langConfig.acceptLanguage,
+                    pinterestDomain: langConfig.pinterestDomain,
+                    language: langConfig.languageCode,
+                  });
+
+                  if (!scrapeResult.success || !scrapeResult.idea) {
+                    await appendDebugLog(logId, `FAIL: "${discovered.title}" - ${scrapeResult.error}`);
+                    return { success: false as const };
+                  }
+
+                  const idea = scrapeResult.idea;
+                  const pins = scrapeResult.pins || [];
+
+                  await appendDebugLog(logId, `OK: "${idea.name}" (${idea.searches} searches, ${pins.length} pins)`);
+
+                  await saveIdeaToDb(idea);
+                  try { await savePinsToDb(idea.id, pins); } catch { /* non-critical */ }
+
+                  // Scrape annotations of this idea
+                  let annotationStats = null;
+                  if (scrapeRelated) {
+                    annotationStats = await scrapeAnnotations(idea, pins, langConfig, maxAnnotations, logId, scrapeOptions, true);
+                  }
+
+                  return { success: true as const, idea, annotationStats };
+                }),
+              );
+
+              // Aggregate results from this batch
+              for (const result of batchResults) {
+                if (result.status === 'rejected') {
                   ideasFailed++;
-                  continue;
-                }
-
-                const idea = scrapeResult.idea;
-                const pins = scrapeResult.pins || [];
-
-                await appendDebugLog(logId, `OK: "${idea.name}" (${idea.searches} searches, ${pins.length} pins)`);
-
-                await saveIdeaToDb(idea);
-                try { await savePinsToDb(idea.id, pins); } catch { /* non-critical */ }
-                ideasScraped++;
-                totalStats.newCreated++;
-
-                // Scrape annotations of this idea
-                if (scrapeRelated) {
-                  const stats = await scrapeAnnotations(idea, pins, langConfig, maxAnnotations, logId, scrapeOptions, true);
+                  await appendDebugLog(logId, `FAIL (rejected): ${result.reason}`);
+                } else if (!result.value.success) {
+                  ideasFailed++;
+                } else {
+                  ideasScraped++;
+                  totalStats.newCreated++;
+                  const stats = result.value.annotationStats;
                   if (stats) {
                     totalStats.total += stats.total;
                     totalStats.scraped += stats.scraped;
@@ -543,24 +564,17 @@ export async function POST(request: NextRequest) {
                     totalStats.failed += stats.failed;
                   }
                 }
-
-                // Update log with progress
-                await updateLog(logId, {
-                  idea_name: `[DISCOVERY] ${ideasScraped}/${discoveredList.length} ideas (${kw})`,
-                  idea_searches: idea.searches,
-                  annotations_total: totalStats.total,
-                  annotations_scraped: totalStats.scraped,
-                  new_created: totalStats.newCreated,
-                  existing_updated: totalStats.existingUpdated,
-                  failed: totalStats.failed,
-                });
-
-                await new Promise(resolve => setTimeout(resolve, 300));
-              } catch (error) {
-                const msg = error instanceof Error ? error.message : 'exception';
-                await appendDebugLog(logId, `FAIL: "${discovered.title}" - ${msg}`);
-                ideasFailed++;
               }
+
+              // Update log with progress after each batch
+              await updateLog(logId, {
+                idea_name: `[DISCOVERY] ${ideasScraped}/${discoveredList.length} ideas (${kw})`,
+                annotations_total: totalStats.total,
+                annotations_scraped: totalStats.scraped,
+                new_created: totalStats.newCreated,
+                existing_updated: totalStats.existingUpdated,
+                failed: totalStats.failed,
+              });
             }
 
             await appendDebugLog(logId, `=== Discovery complete: ${ideasScraped} ideas scraped, ${ideasFailed} failed, ${totalStats.scraped} annotations scraped (${totalStats.newCreated} new, ${totalStats.existingUpdated} updated)`);
