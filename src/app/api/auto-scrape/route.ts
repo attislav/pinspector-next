@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabase } from '@/lib/db';
-import { scrapePinterestIdea } from '@/lib/pinterest-scraper';
+import { scrapePinterestIdea, isValidPinterestIdeasUrl } from '@/lib/pinterest-scraper';
 import { saveIdeaToDb, savePinsToDb } from '@/lib/idea-persistence';
 import { getLanguageConfig } from '@/lib/language-config';
+import { searchGoogle } from '@/lib/search';
 import { Idea, Pin } from '@/types/database';
 
 export const maxDuration = 300;
@@ -314,6 +315,77 @@ async function scrapeAnnotations(
   return stats;
 }
 
+/**
+ * Discovery mode: When no candidates exist, find NEW Pinterest Ideas URLs via Google search
+ * that are not yet in the database, then scrape the first one found.
+ */
+async function discoverNewIdea(
+  keyword: string,
+  langConfig: ReturnType<typeof getLanguageConfig>,
+): Promise<{ url: string; title: string } | null> {
+  const supabase = getSupabase();
+
+  // Search Google for Pinterest Ideas pages matching the keyword
+  const narrowQuery = `${langConfig.siteFilter} ${keyword}`;
+  const narrowResults = await searchGoogle(narrowQuery, 60, {
+    locationCode: langConfig.locationCode,
+    languageCode: langConfig.languageCode,
+  });
+
+  // Filter to valid Pinterest Ideas URLs
+  const validUrls: { url: string; title: string }[] = [];
+  const seen = new Set<string>();
+  for (const result of narrowResults) {
+    if (result.url && result.url.includes('/ideas/') && isValidPinterestIdeasUrl(result.url) && !seen.has(result.url)) {
+      seen.add(result.url);
+      validUrls.push({ url: result.url, title: result.title });
+    }
+  }
+
+  // Fallback: broader search
+  if (validUrls.length < 20) {
+    const broadQuery = `${langConfig.siteFilterBroad} ${keyword}`;
+    const broadResults = await searchGoogle(broadQuery, 60, {
+      locationCode: langConfig.locationCode,
+      languageCode: langConfig.languageCode,
+    });
+    for (const result of broadResults) {
+      if (result.url && result.url.includes('/ideas/') && isValidPinterestIdeasUrl(result.url) && !seen.has(result.url)) {
+        seen.add(result.url);
+        validUrls.push({ url: result.url, title: result.title });
+      }
+    }
+  }
+
+  if (validUrls.length === 0) return null;
+
+  // Extract IDs from URLs and check which ones already exist in DB
+  const urlIdMap = new Map<string, { url: string; title: string }>();
+  for (const item of validUrls) {
+    const idMatch = item.url.match(/\/ideas\/[^/]+\/(\d+)/);
+    if (idMatch) urlIdMap.set(idMatch[1], item);
+  }
+
+  const allIds = Array.from(urlIdMap.keys());
+  const existingIds = new Set<string>();
+
+  // Check in batches of 50
+  for (let i = 0; i < allIds.length; i += 50) {
+    const batch = allIds.slice(i, i + 50);
+    const { data } = await supabase.from('ideas').select('id').in('id', batch);
+    if (data) data.forEach(row => existingIds.add(row.id));
+  }
+
+  // Return the first URL that is NOT in the database
+  for (const id of allIds) {
+    if (!existingIds.has(id)) {
+      return urlIdMap.get(id)!;
+    }
+  }
+
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   // API Key auth
   const apiKey = request.headers.get('x-api-key');
@@ -350,11 +422,138 @@ export async function POST(request: NextRequest) {
 
     const candidate = (candidates as AutoScrapeCandidate[] | null)?.[0];
     if (!candidate) {
-      return NextResponse.json({
-        success: true,
-        message: 'No candidates found — all ideas are up to date',
-        idea: null,
-      });
+      // Discovery mode: find new keywords via Google search instead of doing nothing
+      if (!kw) {
+        return NextResponse.json({
+          success: true,
+          message: 'No candidates found — all ideas are up to date. Provide "kw" to enable discovery of new keywords.',
+          idea: null,
+        });
+      }
+
+      const langConfig = getLanguageConfig(language);
+
+      try {
+        const discovered = await discoverNewIdea(kw, langConfig);
+
+        if (!discovered) {
+          return NextResponse.json({
+            success: true,
+            message: `No candidates and no new "${kw}" ideas found via Google search.`,
+            idea: null,
+            discovery: { searched: true, found: false },
+          });
+        }
+
+        // Dry run: just show what we found
+        if (dryRun) {
+          return NextResponse.json({
+            success: true,
+            dryRun: true,
+            message: `Discovery mode: found new idea "${discovered.title}"`,
+            discovery: {
+              searched: true,
+              found: true,
+              url: discovered.url,
+              title: discovered.title,
+            },
+          });
+        }
+
+        // Create log entry for the discovery scrape
+        const { data: logEntry, error: logError } = await supabase
+          .from('sync_log')
+          .insert({
+            status: 'running',
+            idea_name: `[DISCOVERY] ${discovered.title}`,
+            language,
+            score: 0,
+          })
+          .select('id')
+          .single();
+
+        if (logError || !logEntry) {
+          return NextResponse.json({ success: false, error: `Log error: ${logError?.message}` }, { status: 500 });
+        }
+
+        const logId = logEntry.id;
+        const scrapeOptions: ScrapeOptions = { newKw, kwOnly, kwExclude };
+
+        // Scrape in background
+        after(async () => {
+          try {
+            await appendDebugLog(logId, `[DISCOVERY] No candidates found. Discovered new idea via Google: "${discovered.title}" (${discovered.url})`);
+            await appendDebugLog(logId, `Options: newKw=${newKw}, kwOnly=${kwOnly || 'none'}, kwExclude=${kwExclude || 'none'}, maxAnnotations=${maxAnnotations}`);
+
+            const scrapeResult = await scrapePinterestIdea(discovered.url, {
+              acceptLanguage: langConfig.acceptLanguage,
+              pinterestDomain: langConfig.pinterestDomain,
+              language: langConfig.languageCode,
+            });
+
+            if (!scrapeResult.success || !scrapeResult.idea) {
+              await appendDebugLog(logId, `Discovery scrape FAILED: ${scrapeResult.error}`);
+              await updateLog(logId, {
+                status: 'failed',
+                error: `Discovery scrape failed: ${scrapeResult.error}`,
+                completed_at: new Date().toISOString(),
+              });
+              return;
+            }
+
+            const idea = scrapeResult.idea;
+            const pins = scrapeResult.pins || [];
+
+            await appendDebugLog(logId, `Discovery scrape OK: "${idea.name}" (${idea.searches} searches, ${pins.length} pins)`);
+
+            await saveIdeaToDb(idea);
+            try { await savePinsToDb(idea.id, pins); } catch { /* non-critical */ }
+
+            await updateLog(logId, {
+              idea_id: idea.id,
+              idea_name: `[DISCOVERY] ${idea.name}`,
+              idea_searches: idea.searches,
+            });
+
+            // Scrape annotations of the discovered idea
+            if (scrapeRelated) {
+              await scrapeAnnotations(idea, pins, langConfig, maxAnnotations, logId, scrapeOptions);
+            } else {
+              await updateLog(logId, {
+                status: 'completed',
+                completed_at: new Date().toISOString(),
+              });
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            await appendDebugLog(logId, `FATAL ERROR: ${message}`);
+            await updateLog(logId, {
+              status: 'failed',
+              error: message,
+              completed_at: new Date().toISOString(),
+            });
+          }
+        });
+
+        return NextResponse.json({
+          success: true,
+          logId,
+          discovery: {
+            searched: true,
+            found: true,
+            url: discovered.url,
+            title: discovered.title,
+          },
+          filters: { newKw, kwOnly, kwExclude, minSearches },
+          message: `Discovery mode: no candidates, found and started scraping new idea "${discovered.title}". Check /sync-log for progress.`,
+        });
+      } catch (searchError) {
+        const message = searchError instanceof Error ? searchError.message : 'Search error';
+        return NextResponse.json({
+          success: false,
+          error: `Discovery search failed: ${message}`,
+        }, { status: 500 });
+      }
     }
 
     // Dry Run: show what would be scraped without actually doing it
