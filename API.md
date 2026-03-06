@@ -872,6 +872,24 @@ curl -X POST "$BASE_URL/api/auto-scrape" \
 }
 ```
 
+**Discovery Mode:** Wenn keine Kandidaten gefunden werden (alle Ideas up to date) und `kw` gesetzt ist, sucht der Endpoint automatisch via Google nach neuen Pinterest Ideas URLs die das Keyword enthalten und noch nicht in der DB sind. Die erste gefundene neue Idea wird gescrapt inkl. Annotations. So bleibt der Scrape-Loop auch aktiv wenn alle bestehenden Ideas frisch sind.
+
+**Discovery Response (keine Kandidaten, neue Idea gefunden):**
+```json
+{
+  "success": true,
+  "logId": 43,
+  "discovery": {
+    "searched": true,
+    "found": true,
+    "url": "https://www.pinterest.com/ideas/outfit-ideas/12345/",
+    "title": "Outfit Ideas"
+  },
+  "filters": { "newKw": true, "kwOnly": null, "kwExclude": null, "minSearches": 1 },
+  "message": "Discovery mode: no candidates, found and started scraping new idea \"Outfit Ideas\". Check /sync-log for progress."
+}
+```
+
 **Scraping laeuft im Hintergrund** via Next.js `after()`. Fortschritt im Sync-Log unter `/sync-log` einsehbar. Jeder Scrape-Durchlauf schreibt ein **Debug-Log** mit Details zu jedem einzelnen Annotation-Scrape (Erfolg/Fehler, Quelle, Fehlermeldung). Das Debug-Log ist in der Sync-Log Seite per Klick auf eine Zeile aufklappbar.
 
 **Score-Berechnung:** `normalized(Alter) + normalized(Pivots+Related) + normalized(Suchvolumen)`. Ideas mit weniger als `minSearches` Suchvolumen und veralteten Jahreszahlen (vor aktuellem Jahr) werden ausgeschlossen. Ideas die gerade gescrapt werden (`status='running'` im sync_log) werden uebersprungen -- dadurch koennen 2-3 parallele Requests unterschiedliche Ideas scrapen.
