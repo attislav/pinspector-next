@@ -403,6 +403,7 @@ export async function POST(request: NextRequest) {
     const language: string = body.language || 'de';
     const minAgeDays: number = body.minAgeDays || 30;
     const maxAnnotations: number = Math.min(body.maxAnnotations || 50, 100);
+    const maxIdeas: number = Math.min(body.maxIdeas || 3, 20);
     const scrapeRelated: boolean = body.scrapeRelated !== false;
     const kw: string | null = body.kw || null;
     const newKw: boolean = body.newKw === true;
@@ -439,9 +440,9 @@ export async function POST(request: NextRequest) {
       const langConfig = getLanguageConfig(language);
 
       try {
-        const discoveredList = await discoverNewIdeas(kw, langConfig);
+        const allDiscovered = await discoverNewIdeas(kw, langConfig);
 
-        if (discoveredList.length === 0) {
+        if (allDiscovered.length === 0) {
           return NextResponse.json({
             success: true,
             message: `No candidates and no new "${kw}" ideas found via Google search.`,
@@ -450,17 +451,22 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        // Limit to maxIdeas per run to stay within timeout
+        const discoveredList = allDiscovered.slice(0, maxIdeas);
+
         // Dry run: just show what we found
         if (dryRun) {
           return NextResponse.json({
             success: true,
             dryRun: true,
-            message: `Discovery mode: found ${discoveredList.length} new idea(s)`,
+            message: `Discovery mode: found ${allDiscovered.length} new idea(s), would scrape ${discoveredList.length} (maxIdeas=${maxIdeas})`,
             discovery: {
               searched: true,
               found: true,
+              totalFound: allDiscovered.length,
               count: discoveredList.length,
               ideas: discoveredList,
+              remaining: allDiscovered.length - discoveredList.length,
             },
           });
         }
@@ -582,11 +588,13 @@ export async function POST(request: NextRequest) {
           discovery: {
             searched: true,
             found: true,
+            totalFound: allDiscovered.length,
             count: discoveredList.length,
             ideas: discoveredList.slice(0, 5),
+            remaining: allDiscovered.length - discoveredList.length,
           },
-          filters: { newKw, kwOnly, kwExclude, minSearches },
-          message: `Discovery mode: found ${discoveredList.length} new ideas for "${kw}". Scraping all. Check /sync-log for progress.`,
+          filters: { newKw, kwOnly, kwExclude, minSearches, maxIdeas },
+          message: `Discovery mode: found ${allDiscovered.length} new ideas for "${kw}", scraping ${discoveredList.length} (maxIdeas=${maxIdeas}). Check /sync-log for progress.`,
         });
       } catch (searchError) {
         const message = searchError instanceof Error ? searchError.message : 'Search error';
