@@ -326,12 +326,16 @@ async function scrapeAnnotations(
 async function discoverNewIdeas(
   keyword: string,
   langConfig: ReturnType<typeof getLanguageConfig>,
+  maxIdeas: number,
 ): Promise<{ url: string; title: string }[]> {
   const supabase = getSupabase();
 
+  // Request enough results to find maxIdeas new ones (not all results are valid/new)
+  const searchDepth = Math.min(Math.max(maxIdeas * 3, 10), 60);
+
   // Search Google for Pinterest Ideas pages matching the keyword
   const narrowQuery = `${langConfig.siteFilter} ${keyword}`;
-  const narrowResults = await searchGoogle(narrowQuery, 60, {
+  const narrowResults = await searchGoogle(narrowQuery, searchDepth, {
     locationCode: langConfig.locationCode,
     languageCode: langConfig.languageCode,
   });
@@ -346,10 +350,10 @@ async function discoverNewIdeas(
     }
   }
 
-  // Fallback: broader search
-  if (validUrls.length < 20) {
+  // Fallback: broader search only if we don't have enough valid URLs yet
+  if (validUrls.length < maxIdeas * 2) {
     const broadQuery = `${langConfig.siteFilterBroad} ${keyword}`;
-    const broadResults = await searchGoogle(broadQuery, 60, {
+    const broadResults = await searchGoogle(broadQuery, searchDepth, {
       locationCode: langConfig.locationCode,
       languageCode: langConfig.languageCode,
     });
@@ -440,7 +444,7 @@ export async function POST(request: NextRequest) {
       const langConfig = getLanguageConfig(language);
 
       try {
-        const allDiscovered = await discoverNewIdeas(kw, langConfig);
+        const allDiscovered = await discoverNewIdeas(kw, langConfig, maxIdeas);
 
         if (allDiscovered.length === 0) {
           return NextResponse.json({
