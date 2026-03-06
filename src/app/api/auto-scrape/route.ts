@@ -330,8 +330,8 @@ async function discoverNewIdeas(
 ): Promise<{ url: string; title: string }[]> {
   const supabase = getSupabase();
 
-  // Request enough results to find maxIdeas new ones (not all results are valid/new)
-  const searchDepth = Math.min(Math.max(maxIdeas * 3, 10), 60);
+  // 1 page = 10 results from DataForSEO, usually enough for discovery
+  const searchDepth = 10;
 
   // Search Google for Pinterest Ideas pages matching the keyword
   const narrowQuery = `${langConfig.siteFilter} ${keyword}`;
