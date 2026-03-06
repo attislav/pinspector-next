@@ -182,6 +182,7 @@ async function scrapeAnnotations(
   maxAnnotations: number,
   logId: number,
   options: ScrapeOptions,
+  skipLogFinalize = false,
 ) {
   const supabase = getSupabase();
   const stats = { total: 0, scraped: 0, newCreated: 0, existingUpdated: 0, failed: 0, filtered: 0, skippedExisting: 0 };
@@ -301,28 +302,31 @@ async function scrapeAnnotations(
 
   await appendDebugLog(logId, `Done: ${stats.scraped} scraped, ${stats.newCreated} new, ${stats.existingUpdated} updated, ${stats.failed} failed`);
 
-  // Update log with final stats
-  await updateLog(logId, {
-    annotations_total: stats.total,
-    annotations_scraped: stats.scraped,
-    new_created: stats.newCreated,
-    existing_updated: stats.existingUpdated,
-    failed: stats.failed,
-    status: 'completed',
-    completed_at: new Date().toISOString(),
-  });
+  // Update log with final stats (skip finalize when called in a loop, e.g. discovery mode)
+  if (!skipLogFinalize) {
+    await updateLog(logId, {
+      annotations_total: stats.total,
+      annotations_scraped: stats.scraped,
+      new_created: stats.newCreated,
+      existing_updated: stats.existingUpdated,
+      failed: stats.failed,
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    });
+  }
 
   return stats;
 }
 
 /**
  * Discovery mode: When no candidates exist, find NEW Pinterest Ideas URLs via Google search
- * that are not yet in the database, then scrape the first one found.
+ * that are not yet in the database.
+ * Returns ALL new URLs found (not just the first one).
  */
-async function discoverNewIdea(
+async function discoverNewIdeas(
   keyword: string,
   langConfig: ReturnType<typeof getLanguageConfig>,
-): Promise<{ url: string; title: string } | null> {
+): Promise<{ url: string; title: string }[]> {
   const supabase = getSupabase();
 
   // Search Google for Pinterest Ideas pages matching the keyword
@@ -357,7 +361,7 @@ async function discoverNewIdea(
     }
   }
 
-  if (validUrls.length === 0) return null;
+  if (validUrls.length === 0) return [];
 
   // Extract IDs from URLs and check which ones already exist in DB
   const urlIdMap = new Map<string, { url: string; title: string }>();
@@ -376,14 +380,15 @@ async function discoverNewIdea(
     if (data) data.forEach(row => existingIds.add(row.id));
   }
 
-  // Return the first URL that is NOT in the database
+  // Return ALL URLs that are NOT in the database
+  const newIdeas: { url: string; title: string }[] = [];
   for (const id of allIds) {
     if (!existingIds.has(id)) {
-      return urlIdMap.get(id)!;
+      newIdeas.push(urlIdMap.get(id)!);
     }
   }
 
-  return null;
+  return newIdeas;
 }
 
 export async function POST(request: NextRequest) {
@@ -434,14 +439,14 @@ export async function POST(request: NextRequest) {
       const langConfig = getLanguageConfig(language);
 
       try {
-        const discovered = await discoverNewIdea(kw, langConfig);
+        const discoveredList = await discoverNewIdeas(kw, langConfig);
 
-        if (!discovered) {
+        if (discoveredList.length === 0) {
           return NextResponse.json({
             success: true,
             message: `No candidates and no new "${kw}" ideas found via Google search.`,
             idea: null,
-            discovery: { searched: true, found: false },
+            discovery: { searched: true, found: false, count: 0 },
           });
         }
 
@@ -450,22 +455,23 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({
             success: true,
             dryRun: true,
-            message: `Discovery mode: found new idea "${discovered.title}"`,
+            message: `Discovery mode: found ${discoveredList.length} new idea(s)`,
             discovery: {
               searched: true,
               found: true,
-              url: discovered.url,
-              title: discovered.title,
+              count: discoveredList.length,
+              ideas: discoveredList,
             },
           });
         }
 
         // Create log entry for the discovery scrape
+        const titles = discoveredList.map(d => d.title).slice(0, 3).join(', ');
         const { data: logEntry, error: logError } = await supabase
           .from('sync_log')
           .insert({
             status: 'running',
-            idea_name: `[DISCOVERY] ${discovered.title}`,
+            idea_name: `[DISCOVERY] ${discoveredList.length} ideas: ${titles}${discoveredList.length > 3 ? '...' : ''}`,
             language,
             score: 0,
           })
@@ -479,51 +485,86 @@ export async function POST(request: NextRequest) {
         const logId = logEntry.id;
         const scrapeOptions: ScrapeOptions = { newKw, kwOnly, kwExclude };
 
-        // Scrape in background
+        // Scrape ALL discovered ideas in background
         after(async () => {
+          const totalStats = { total: 0, scraped: 0, newCreated: 0, existingUpdated: 0, failed: 0 };
+          let ideasScraped = 0;
+          let ideasFailed = 0;
+
           try {
-            await appendDebugLog(logId, `[DISCOVERY] No candidates found. Discovered new idea via Google: "${discovered.title}" (${discovered.url})`);
+            await appendDebugLog(logId, `[DISCOVERY] No candidates found. Discovered ${discoveredList.length} new ideas via Google for "${kw}"`);
             await appendDebugLog(logId, `Options: newKw=${newKw}, kwOnly=${kwOnly || 'none'}, kwExclude=${kwExclude || 'none'}, maxAnnotations=${maxAnnotations}`);
 
-            const scrapeResult = await scrapePinterestIdea(discovered.url, {
-              acceptLanguage: langConfig.acceptLanguage,
-              pinterestDomain: langConfig.pinterestDomain,
-              language: langConfig.languageCode,
-            });
+            for (let i = 0; i < discoveredList.length; i++) {
+              const discovered = discoveredList[i];
+              await appendDebugLog(logId, `--- Idea ${i + 1}/${discoveredList.length}: "${discovered.title}" (${discovered.url})`);
 
-            if (!scrapeResult.success || !scrapeResult.idea) {
-              await appendDebugLog(logId, `Discovery scrape FAILED: ${scrapeResult.error}`);
-              await updateLog(logId, {
-                status: 'failed',
-                error: `Discovery scrape failed: ${scrapeResult.error}`,
-                completed_at: new Date().toISOString(),
-              });
-              return;
+              try {
+                const scrapeResult = await scrapePinterestIdea(discovered.url, {
+                  acceptLanguage: langConfig.acceptLanguage,
+                  pinterestDomain: langConfig.pinterestDomain,
+                  language: langConfig.languageCode,
+                });
+
+                if (!scrapeResult.success || !scrapeResult.idea) {
+                  await appendDebugLog(logId, `FAIL: "${discovered.title}" - ${scrapeResult.error}`);
+                  ideasFailed++;
+                  continue;
+                }
+
+                const idea = scrapeResult.idea;
+                const pins = scrapeResult.pins || [];
+
+                await appendDebugLog(logId, `OK: "${idea.name}" (${idea.searches} searches, ${pins.length} pins)`);
+
+                await saveIdeaToDb(idea);
+                try { await savePinsToDb(idea.id, pins); } catch { /* non-critical */ }
+                ideasScraped++;
+                totalStats.newCreated++;
+
+                // Scrape annotations of this idea
+                if (scrapeRelated) {
+                  const stats = await scrapeAnnotations(idea, pins, langConfig, maxAnnotations, logId, scrapeOptions, true);
+                  if (stats) {
+                    totalStats.total += stats.total;
+                    totalStats.scraped += stats.scraped;
+                    totalStats.newCreated += stats.newCreated;
+                    totalStats.existingUpdated += stats.existingUpdated;
+                    totalStats.failed += stats.failed;
+                  }
+                }
+
+                // Update log with progress
+                await updateLog(logId, {
+                  idea_name: `[DISCOVERY] ${ideasScraped}/${discoveredList.length} ideas (${kw})`,
+                  idea_searches: idea.searches,
+                  annotations_total: totalStats.total,
+                  annotations_scraped: totalStats.scraped,
+                  new_created: totalStats.newCreated,
+                  existing_updated: totalStats.existingUpdated,
+                  failed: totalStats.failed,
+                });
+
+                await new Promise(resolve => setTimeout(resolve, 300));
+              } catch (error) {
+                const msg = error instanceof Error ? error.message : 'exception';
+                await appendDebugLog(logId, `FAIL: "${discovered.title}" - ${msg}`);
+                ideasFailed++;
+              }
             }
 
-            const idea = scrapeResult.idea;
-            const pins = scrapeResult.pins || [];
-
-            await appendDebugLog(logId, `Discovery scrape OK: "${idea.name}" (${idea.searches} searches, ${pins.length} pins)`);
-
-            await saveIdeaToDb(idea);
-            try { await savePinsToDb(idea.id, pins); } catch { /* non-critical */ }
+            await appendDebugLog(logId, `=== Discovery complete: ${ideasScraped} ideas scraped, ${ideasFailed} failed, ${totalStats.scraped} annotations scraped (${totalStats.newCreated} new, ${totalStats.existingUpdated} updated)`);
 
             await updateLog(logId, {
-              idea_id: idea.id,
-              idea_name: `[DISCOVERY] ${idea.name}`,
-              idea_searches: idea.searches,
+              idea_name: `[DISCOVERY] ${ideasScraped}/${discoveredList.length} ideas (${kw})`,
+              annotations_total: totalStats.total,
+              annotations_scraped: totalStats.scraped,
+              new_created: totalStats.newCreated,
+              existing_updated: totalStats.existingUpdated,
+              failed: totalStats.failed,
+              status: 'completed',
+              completed_at: new Date().toISOString(),
             });
-
-            // Scrape annotations of the discovered idea
-            if (scrapeRelated) {
-              await scrapeAnnotations(idea, pins, langConfig, maxAnnotations, logId, scrapeOptions);
-            } else {
-              await updateLog(logId, {
-                status: 'completed',
-                completed_at: new Date().toISOString(),
-              });
-            }
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             await appendDebugLog(logId, `FATAL ERROR: ${message}`);
@@ -541,18 +582,19 @@ export async function POST(request: NextRequest) {
           discovery: {
             searched: true,
             found: true,
-            url: discovered.url,
-            title: discovered.title,
+            count: discoveredList.length,
+            ideas: discoveredList.slice(0, 5),
           },
           filters: { newKw, kwOnly, kwExclude, minSearches },
-          message: `Discovery mode: no candidates, found and started scraping new idea "${discovered.title}". Check /sync-log for progress.`,
+          message: `Discovery mode: found ${discoveredList.length} new ideas for "${kw}". Scraping all. Check /sync-log for progress.`,
         });
       } catch (searchError) {
         const message = searchError instanceof Error ? searchError.message : 'Search error';
         return NextResponse.json({
-          success: false,
-          error: `Discovery search failed: ${message}`,
-        }, { status: 500 });
+          success: true,
+          discovery: { searched: true, found: false, error: message },
+          message: `Discovery search failed: ${message}`,
+        });
       }
     }
 
