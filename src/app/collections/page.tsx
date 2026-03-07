@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import {
-  Plus, Trash2, Copy, List, Download, Pencil, Check, X, FolderOpen, ChevronDown, ChevronRight, CheckCircle, Circle,
+  Plus, Trash2, Copy, List, Download, Pencil, Check, X, FolderOpen, ChevronDown, ChevronRight, CheckCircle, Circle, Loader2,
 } from 'lucide-react';
 import { useKeywordCollections } from '@/context/KeywordCollectionContext';
 import { KeywordCollectionItem } from '@/types/database';
@@ -24,6 +24,46 @@ export default function CollectionsPage() {
   const [editingKeywordsId, setEditingKeywordsId] = useState<string | null>(null);
   const [bulkText, setBulkText] = useState('');
   const [selectedKeywords, setSelectedKeywords] = useState<Set<string>>(new Set());
+  const [lookupLoading, setLookupLoading] = useState<string | null>(null);
+
+  const lookupSearchVolumes = useCallback(async (collectionId: string, keywords: string[]) => {
+    try {
+      setLookupLoading(collectionId);
+      const res = await fetch('/api/keywords-lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords }),
+      });
+      if (!res.ok) return;
+      const { results } = await res.json();
+      if (!results || Object.keys(results).length === 0) return;
+
+      // Read fresh state from localStorage to avoid stale closure
+      const stored = localStorage.getItem('pinspector-keyword-collections');
+      if (!stored) return;
+      const allCollections = JSON.parse(stored);
+      const collection = allCollections.find((c: { id: string }) => c.id === collectionId);
+      if (!collection) return;
+
+      let changed = false;
+      const updatedItems = collection.items.map((item: KeywordCollectionItem) => {
+        const match = results[item.keyword.toLowerCase()];
+        if (match && item.searches === 0) {
+          changed = true;
+          return { ...item, searches: match.searches, id: match.id };
+        }
+        return item;
+      });
+
+      if (changed) {
+        updateItems(collectionId, updatedItems);
+      }
+    } catch (e) {
+      console.error('Search volume lookup failed:', e);
+    } finally {
+      setLookupLoading(null);
+    }
+  }, [updateItems]);
 
   const handleCreate = () => {
     if (!newCollectionName.trim()) return;
@@ -40,9 +80,12 @@ export default function CollectionsPage() {
 
   const handleAddKeyword = (collectionId: string) => {
     if (!newKeyword.trim()) return;
-    const items: KeywordCollectionItem[] = newKeyword.split(',').map(k => k.trim()).filter(Boolean).map(k => ({ keyword: k, searches: 0 }));
+    const keywords = newKeyword.split(',').map(k => k.trim()).filter(Boolean);
+    const items: KeywordCollectionItem[] = keywords.map(k => ({ keyword: k, searches: 0 }));
     addItems(collectionId, items);
     setNewKeyword('');
+    // Auto-populate search volumes from DB
+    lookupSearchVolumes(collectionId, keywords);
   };
 
   const showCopyFeedback = (msg: string) => {
@@ -100,6 +143,11 @@ export default function CollectionsPage() {
     updateItems(collectionId, items);
     setEditingKeywordsId(null);
     setBulkText('');
+    // Auto-populate search volumes for items that have 0 searches
+    const zeroSearchItems = items.filter(i => i.searches === 0);
+    if (zeroSearchItems.length > 0) {
+      lookupSearchVolumes(collectionId, zeroSearchItems.map(i => i.keyword));
+    }
   };
 
   const toggleKeyword = (keyword: string) => {
@@ -432,7 +480,14 @@ export default function CollectionsPage() {
                             <tr>
                               <td></td>
                               <td></td>
-                              <td className="px-3 py-2 text-xs font-medium text-gray-500">{collection.items.length} Keywords</td>
+                              <td className="px-3 py-2 text-xs font-medium text-gray-500">
+                                {collection.items.length} Keywords
+                                {lookupLoading === collection.id && (
+                                  <span className="inline-flex items-center gap-1 ml-2 text-amber-600">
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Suchvolumen wird geladen...
+                                  </span>
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-xs text-right font-medium text-gray-500">
                                 {formatNumber(collection.items.reduce((sum, i) => sum + i.searches, 0))} total
                               </td>
